@@ -1,0 +1,20 @@
+{
+  "name": "witx",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22",
+    "pnpm": "10.33.0"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @witx/web dev",
+    "build:web": "pnpm --filter @witx/web build",
+    "typecheck:web": "pnpm --filter @witx/web typecheck",
+    "lint:web": "pnpm --filter @witx/web lint",
+    "test:web": "pnpm --filter @witx/web test",
+    "test:browser:web": "pnpm --filter @witx/web test:browser",
+    "format:web": "pnpm --filter @witx/web format",
+    "format:check:web": "pnpm --filter @witx/web format:check"
+  },
+  "license": "Apache-2.0"
+}

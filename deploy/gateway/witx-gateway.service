@@ -1,0 +1,24 @@
+# systemd unit for a Linux Gateway host (Android phones over ADB, Appium on loopback).
+# Install: copy to /etc/systemd/system/, adjust the paths and user, then
+#   sudo -u witx witx-gateway --config /etc/witx/gateway.toml enroll    # once
+#   systemctl enable --now witx-gateway
+# Without a desktop session there is no Secret Service: the credential is kept next to
+# the journal in /var/lib/witx (mode 0600).
+[Unit]
+Description=WitX Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=witx
+ExecStart=/opt/witx-gateway/bin/witx-gateway --config /etc/witx/gateway.toml
+Restart=always
+RestartSec=5
+StateDirectory=witx
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

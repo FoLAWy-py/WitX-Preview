@@ -1,0 +1,45 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+gateway.toml
+*.credential
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+
+# Runtime data and backups
+.witx-dev/
+.witx/
+objects/
+plugins/
+backups/
+*.sqlite*
+*.db
+*.dump
+*.log
+*.pid
+
+# Dependencies, generated builds, test outputs and editor state
+node_modules/
+.venv/
+dist/
+build/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.import_linter_cache/
+.vite/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.DS_Store
+.idea/
+.vscode/
+.codex/
+.agents/

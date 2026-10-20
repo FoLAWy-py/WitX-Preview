@@ -1,0 +1,72 @@
+[project]
+name = "witx-workspace"
+version = "0.2.0"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = ["witx-cloud", "witx-gateway", "witx-contracts"]
+
+[tool.uv.workspace]
+members = ["services/cloud", "services/gateway", "packages/contracts"]
+
+[tool.uv.sources]
+witx-cloud = { workspace = true }
+witx-gateway = { workspace = true }
+witx-contracts = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=1.0,<2",
+  "ruff>=0.12,<1",
+  "mypy>=1.17,<2",
+  "import-linter>=2.3,<3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["models(catalog): the WITX_MODELS catalog an API test serves"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = ["services/cloud", "services/gateway", "packages/contracts"]
+packages = ["witx", "witx_gateway", "witx_contracts"]
+plugins = ["pydantic.mypy"]
+
+[tool.importlinter]
+root_packages = ["witx", "witx_gateway", "witx_contracts"]
+
+[[tool.importlinter.contracts]]
+name = "Cloud layers"
+type = "layers"
+layers = [
+  "witx.cli",
+  "witx.api",
+  "witx.hub | witx.worker",
+  "witx.harness",
+  "witx.services",
+  "witx.store | witx.models | witx.objects",
+  "witx.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Gateway does not import the cloud"
+type = "forbidden"
+source_modules = ["witx_gateway"]
+forbidden_modules = ["witx"]
+
+[[tool.importlinter.contracts]]
+name = "Contracts are standalone"
+type = "forbidden"
+source_modules = ["witx_contracts"]
+forbidden_modules = ["witx", "witx_gateway"]

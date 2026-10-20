@@ -1,0 +1,42 @@
+# WitX Gateway: drives the phones and simulators connected to this computer.
+#
+#   appium driver install xcuitest uiautomator2   # once
+#   appium --address 127.0.0.1 --port 4723 --log-level warn   # keep running; warn
+#                                              # keeps typed text out of its log
+#   uv run witx-gateway --config gateway.toml enroll   # once, with the code from
+#                                              # `witx admin add-gateway`
+#   uv run witx-gateway --config gateway.toml
+#
+# The Gateway finds devices by itself (adb devices, xcrun devicectl, booted simulators)
+# and reports what each still needs. A new device takes tasks once an owner enables it
+# on the Web app's Devices page. The Gateway opens, reopens and closes the Appium
+# sessions and gives every device its own local ports. Run `ANDROID_HOME=... ` so it
+# finds adb, and keep Appium on this computer.
+
+cloud_url = "http://127.0.0.1:8000"
+journal = "witx-gateway.sqlite3"   # keep it on a local disk; the credential is stored
+                                   # under this path (moving it means enrolling again)
+appium_url = "http://127.0.0.1:4723"
+
+# A phone dedicated to this pool (kept unlocked, not carried around) can be kept ready: with
+# keep_warm = true, here for every phone found or in a [[devices]] entry for one, the
+# Gateway opens its Appium session as soon as nothing is left to fix and keeps it open
+# (a real iPhone needs several seconds to start its agent, and as long as the phone is
+# locked it waits for it to be unlocked), checking it every few seconds and starting it
+# again when it was lost.
+# keep_warm = true
+
+# Optional settings for one device, matched by platform and native_id (the UDID, or
+# the serial from `adb devices`). A device without an entry works with the defaults.
+#
+# A real iPhone needs WebDriverAgent signed with your team (`witx-gateway --config
+# gateway.toml setup` adds this entry for you, from your Apple Development certificate;
+# a running Gateway picks up entries added or changed here within seconds, no restart):
+#
+# [[devices]]
+# platform = "ios"
+# native_id = "00000000-0000XXXXXXXXXXXX"
+# name = "Test iPhone"
+# capabilities = { "appium:xcodeOrgId" = "TEAMID", "appium:xcodeSigningId" = "Apple Development", "appium:updatedWDABundleId" = "com.example.WebDriverAgentRunner" }
+# # Every input inside these apps counts as sensitive (asks in "approve for me").
+# sensitive_apps = ["com.apple.Passbook", "com.apple.MobileSMS"]

@@ -1,0 +1,9 @@
+WitX
+Copyright 2026 FoLAWy-py and WitX contributors
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the terms.
+
+Third-party dependencies retain their own copyrights and licenses. The web
+application's dependency notices are in apps/web/public/THIRD_PARTY_NOTICES.txt
+(and /THIRD_PARTY_NOTICES.txt in a built web distribution). Python dependencies
+are installed separately and retain the license files in their distributions.

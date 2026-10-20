@@ -1,0 +1,8 @@
+# Synthetic device for checking the local API / Worker / Gateway connection.
+cloud_url = "http://127.0.0.1:8000"
+journal = "witx-gateway.sqlite3"
+
+[[devices]]
+platform = "fake"
+native_id = "preview-fake-1"
+name = "Preview fake phone"

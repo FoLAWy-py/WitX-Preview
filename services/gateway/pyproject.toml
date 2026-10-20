@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "witx-gateway"
+version = "0.2.0"
+description = "WitX Gateway: runs next to the phones and executes admitted input"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = [
+    "witx-contracts",
+    "websockets>=15,<18",
+    "httpx>=0.28,<0.29",
+    "pillow>=11,<13",
+    "keyring>=25,<26",
+]
+
+[project.scripts]
+witx-gateway = "witx_gateway.main:main"
+
+[tool.uv.sources]
+witx-contracts = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["witx_gateway*"]
+
+[tool.setuptools.package-data]
+witx_gateway = ["py.typed"]

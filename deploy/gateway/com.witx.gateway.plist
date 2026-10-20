@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- launchd agent for a macOS Gateway host (iOS through Xcode / WDA, and Android).
+     A user agent, not a daemon: the credential is in that user's login Keychain and
+     Xcode needs the user session. Adjust the paths, then:
+       witx-gateway --config ~/witx/gateway.toml enroll          # once
+       cp com.witx.gateway.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.witx.gateway.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.witx.gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/REPLACE/witx/.venv/bin/witx-gateway</string>
+    <string>--config</string>
+    <string>/Users/REPLACE/witx/gateway.toml</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/Users/REPLACE/witx/gateway.log</string>
+</dict>
+</plist>

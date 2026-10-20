@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- cover: the page reaches under the notch and home indicator, and keeps clear of
+         them with env(safe-area-inset-*); resizes-content: the on-screen keyboard
+         shrinks the page, so the message box stays above it (Android). -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta
+      name="theme-color"
+      content="#f7f6f4"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0b0c0e"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta
+      name="description"
+      content="WitX: give your phones a goal, approve what matters."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>WitX</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

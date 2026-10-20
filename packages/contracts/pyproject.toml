@@ -1,0 +1,18 @@
+[project]
+name = "witx-contracts"
+version = "0.2.0"
+description = "Wire contracts shared by the WitX cloud, Gateway and Web app"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = ["pydantic>=2.11,<3"]
+
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["witx_contracts*"]
+
+[tool.setuptools.package-data]
+witx_contracts = ["py.typed"]

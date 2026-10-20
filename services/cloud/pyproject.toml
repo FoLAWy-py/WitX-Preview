@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "witx-cloud"
+version = "0.2.0"
+description = "WitX cloud: API, Harness worker and Gateway hub"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = [
+  "witx-contracts",
+  "fastapi>=0.116,<1",
+  "pydantic>=2.11,<3",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "psycopg[binary]>=3.2,<4",
+  "uvicorn[standard]>=0.35,<1",
+  "httpx>=0.28,<0.29",
+  "joserfc>=1.4,<2",
+  "mcp==2.2.0",
+  "pillow>=11,<13",  # thumbnails of screenshots for the web
+  "opentelemetry-sdk>=1.30,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
+  "opentelemetry-instrumentation-fastapi>=0.51b0",
+  "opentelemetry-instrumentation-httpx>=0.51b0",
+  "opentelemetry-instrumentation-sqlalchemy>=0.51b0",
+]
+
+[project.scripts]
+witx = "witx.cli:main"
+
+[tool.uv.sources]
+witx-contracts = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["witx*"]
+
+[tool.setuptools.package-data]
+witx = ["py.typed", "store/migrations/*.sql"]
