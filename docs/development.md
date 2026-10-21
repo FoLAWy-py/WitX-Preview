@@ -67,6 +67,22 @@ Compose 提供 PostgreSQL、迁移、API / Hub、Worker 和 Nginx。按 `deploy/
 
 截图和 Plugin 默认在私有卷；可配置 S3 兼容对象存储。API 的 `/health/ready` 检查数据库和对象存储，`witx check` 额外检查模型目录可用性；模型列表可用不保证每次推理成功。日志默认结构化并脱敏，`/metrics` 需要配置 token。扩展 API 实例时，人工接管和 MCP 会话需要粘性路由。
 
+## Preview 插件源
+
+内置源 `witx-preview` 对应公开仓库 `https://github.com/FoLAWy-py/witx-plugins-preview.git`，不需要手动添加。安装、查看和更新：
+
+```sh
+uv run witx plugin install basics
+uv run witx plugin list
+uv run witx plugin update basics
+```
+
+也可以显式指定 `basics@witx-preview`。安装展示全文，更新展示差异，确认后才生效；锁文件记录 marketplace、commit 和内容摘要。
+
+如果之前从旧的 `witx` 源安装过 `basics`，请先运行 `uv run witx plugin remove basics`，再运行上面的安装命令，检查并确认新的来源。已有安装的来源不会被静默改写。
+
+两个 Preview 仓库的 CI 相互检查：WitX-Preview 检查插件兼容性及内置源名称是否匹配 marketplace；插件仓库使用公开 WitX-Preview main 运行兼容检查。首次配套发布时先推送插件仓库，再推送 WitX-Preview。
+
 ## 备份恢复
 
 `deploy/backup.sh` 备份数据库、截图和 Plugin；`deploy/restore.sh <时间戳>` 停止服务、恢复数据并运行 `witx admin recover`。默认备份保留 30 天。请另行安全保全对象存储的 `ledger/` 恢复账本，两个脚本刻意不回滚它；单机磁盘全部丢失时，仅普通备份不足以重建后续删除 / 撤销状态。S3 部署可使用版本控制，并实际演练恢复。

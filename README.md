@@ -62,7 +62,7 @@ make dev-gateway GATEWAY_CONFIG=gateway.toml
 
 打开 http://127.0.0.1:5173，以 `.env.example` 中的开发令牌 `dev-token-alice` 登录，在设备页启用假设备。假设备仅用于检查链路，每次输入只改变合成画面的颜色，不模拟真实 App。
 
-真实设备配置见 [gateway.example.toml](services/gateway/gateway.example.toml)。Plugin 可选：`uv run witx plugin install basics` 会从[公开 marketplace](https://github.com/FoLAWy-py/witx-plugins)获取并展示内容，确认后安装；Plugin 具有独立的许可声明。
+真实设备配置见 [gateway.example.toml](services/gateway/gateway.example.toml)。Plugin 可选：`uv run witx plugin install basics` 会从[公开 marketplace](https://github.com/FoLAWy-py/witx-plugins-preview)获取并展示内容，确认后安装；内置源名称为 `witx-preview`，也可显式运行 `uv run witx plugin install basics@witx-preview`，无需先添加 marketplace。Plugin 具有独立的许可声明。
 
 ## Preview 的已知限制
 

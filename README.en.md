@@ -62,7 +62,7 @@ make dev-gateway GATEWAY_CONFIG=gateway.toml
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173), sign in with the development token `dev-token-alice` from `.env.example`, and enable the fake device on the Devices page. The fake device only checks the service connection: each input changes the color of a synthetic screen. It does not simulate real apps.
 
-For real devices, see [gateway.example.toml](services/gateway/gateway.example.toml). Plugins are optional: `uv run witx plugin install basics` fetches content from the [public marketplace](https://github.com/FoLAWy-py/witx-plugins), displays it for review, and installs it after confirmation. Plugins have their own license notices.
+For real devices, see [gateway.example.toml](services/gateway/gateway.example.toml). Plugins are optional: `uv run witx plugin install basics` fetches content from the [public marketplace](https://github.com/FoLAWy-py/witx-plugins-preview), displays it for review, and installs it after confirmation. The built-in source is named `witx-preview`; `uv run witx plugin install basics@witx-preview` selects it explicitly. There is no need to add the marketplace first. Plugins have their own license notices.
 
 ## Known Preview limitations
 

@@ -487,7 +487,7 @@ async def test_the_owner_installs_updates_and_removes_a_plugin_over_the_api(
     marketplace(market, [entry], prefixed("plugins/sample-plugin", plugin()))
     store.add_marketplace(str(market))
     listed = (await client.get("/api/v1/marketplaces")).json()
-    assert [m["name"] for m in listed["marketplaces"]] == ["witx", "samples"]
+    assert [m["name"] for m in listed["marketplaces"]] == ["witx-preview", "samples"]
 
     (offer,) = (await client.get("/api/v1/marketplaces/samples/plugins")).json()
     assert (offer["version"], offer["files"][0]["installed"]) == ("1.0.0", None)

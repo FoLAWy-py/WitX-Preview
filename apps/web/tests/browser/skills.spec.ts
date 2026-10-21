@@ -17,7 +17,7 @@ const MINE = {
 const THEIRS = {
   name: "basics:test-records",
   plugin: "basics",
-  marketplace: "witx",
+  marketplace: "witx-preview",
   version: "1.1",
   description: "Create and verify a test record.",
   apps: [],
@@ -127,7 +127,7 @@ test("the skills the agent can load are listed, with the plugins that are not lo
   await signIn(page);
 
   await expect(page.getByText("Yours · v0.1.1")).toBeVisible();
-  await expect(page.getByText("basics from witx · v1.1")).toBeVisible();
+  await expect(page.getByText("basics from witx-preview · v1.1")).toBeVisible();
   await expect(page.getByText("shop is not loaded:")).toBeVisible();
   await page.getByRole("button", { name: /basics:test-records/ }).click();
   await expect(
@@ -498,7 +498,7 @@ const OFFER = {
   version: "1.2.0",
   description: "Basic know-how.",
   skills: ["basics:test-records"],
-  source: "https://github.com/FoLAWy-py/witx-plugins.git",
+  source: "https://github.com/FoLAWy-py/witx-plugins-preview.git",
   commit: "a".repeat(40),
   sha256: "b".repeat(64),
   trouble: [],
@@ -523,12 +523,12 @@ async function marketplaces(
   await page.route("**/api/v1/marketplaces", (route) =>
     route.fulfill({
       json: {
-        marketplaces: [{ name: "witx", source: OFFER.source }],
+        marketplaces: [{ name: "witx-preview", source: OFFER.source }],
         installed,
       },
     }),
   );
-  await page.route("**/api/v1/marketplaces/witx/plugins", (route) =>
+  await page.route("**/api/v1/marketplaces/witx-preview/plugins", (route) =>
     route.fulfill({ json: offers }),
   );
 }
@@ -540,13 +540,13 @@ test("a plugin is installed once the person has read it, bound to what they read
   const installs: unknown[] = [];
   await marketplaces(page, [], [OFFER]);
   await page.route(
-    "**/api/v1/marketplaces/witx/plugins/basics/install",
+    "**/api/v1/marketplaces/witx-preview/plugins/basics/install",
     (route) => {
       installs.push(route.request().postDataJSON());
       return route.fulfill({
         json: {
           name: "basics",
-          marketplace: "witx",
+          marketplace: "witx-preview",
           version: "1.2.0",
           commit: OFFER.commit,
         },
@@ -578,7 +578,7 @@ test("an update shows what changes, and a plugin that does not fit cannot be ins
   await mockApi(page, []);
   const installed = {
     name: "basics",
-    marketplace: "witx",
+    marketplace: "witx-preview",
     version: "1.1.0",
     commit: "c".repeat(40),
   };
@@ -596,7 +596,7 @@ test("an update shows what changes, and a plugin that does not fit cannot be ins
   await marketplaces(page, [installed], [update, unfit]);
   await signIn(page, "/customize?tab=plugins");
 
-  await expect(page.getByText("v1.1.0 from witx")).toBeVisible();
+  await expect(page.getByText("v1.1.0 from witx-preview")).toBeVisible();
   await page.getByRole("button", { name: "Look" }).click();
   await page.getByRole("button", { name: "Update" }).click();
   const changes = page
@@ -628,7 +628,7 @@ test("an installed plugin shows the skills it brings, and one opens on the Skill
         installed: [
           {
             name: "basics",
-            marketplace: "witx",
+            marketplace: "witx-preview",
             version: "1.1",
             commit: "c".repeat(40),
           },

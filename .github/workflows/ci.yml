@@ -31,7 +31,16 @@ jobs:
       - run: make setup
       - run: pnpm --filter @witx/web exec playwright install --with-deps chromium
       - run: make check
-      # The official plugins must still fit this build: a renamed or removed tool
-      # or effect shows here, naming the skills to change in witx-plugins.
-      - run: git clone --depth 1 https://github.com/FoLAWy-py/witx-plugins.git /tmp/witx-plugins
-      - run: uv run --locked witx plugin check /tmp/witx-plugins
+      - name: Check Preview plugin compatibility
+        run: |
+          git clone --depth 1 https://github.com/FoLAWy-py/witx-plugins-preview.git "$RUNNER_TEMP/witx-plugins-preview"
+          uv run --locked witx plugin check "$RUNNER_TEMP/witx-plugins-preview"
+          uv run --locked python - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          from witx.harness.plugins import OFFICIAL
+
+          manifest = Path(os.environ["RUNNER_TEMP"]) / "witx-plugins-preview/.witx-plugin/marketplace.json"
+          assert json.loads(manifest.read_text())["name"] == OFFICIAL, "Preview marketplace name differs from the built-in source"
+          PYTHON

@@ -2,6 +2,8 @@
 
 import json
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -180,6 +182,38 @@ def run_cli(monkeypatch: pytest.MonkeyPatch, root: Path, answer: str, *args: str
     with pytest.raises(SystemExit) as done:
         cli.main()
     return int(done.value.code or 0)
+
+
+def test_installing_without_a_marketplace_uses_the_builtin_preview_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    market = tmp_path / "market"
+    manifest = {
+        "name": "witx-preview",
+        "plugins": [{"name": "sample-plugin", "source": "./plugins/sample-plugin"}],
+    }
+    commit(
+        market,
+        {
+            ".witx-plugin/marketplace.json": json.dumps(manifest),
+            **prefixed("plugins/sample-plugin", plugin()),
+        },
+    )
+    clone = plugins._clone
+
+    @contextmanager
+    def preview_source(source: str, revision: str | None = None) -> Iterator[tuple[Path, str]]:
+        assert source == "https://github.com/FoLAWy-py/witx-plugins-preview.git"
+        with clone(str(market), revision) as fetched:
+            yield fetched
+
+    monkeypatch.setattr(plugins, "_clone", preview_source)
+    root = tmp_path / "plugins"
+    assert run_cli(monkeypatch, root, "y", "install", "sample-plugin") == 0
+    entry = Installed(root).locked()["sample-plugin"]
+    assert entry.marketplace == "witx-preview"
+    assert entry.source == "https://github.com/FoLAWy-py/witx-plugins-preview.git"
+    assert list(Installed(root).skills()) == ["sample-plugin:sample"]
 
 
 def test_a_plugin_is_installed_only_once_a_person_has_read_it_and_confirmed(

@@ -40,8 +40,8 @@ from witx.harness.skills import Plugin, Skill
 
 log = logging.getLogger(__name__)
 
-OFFICIAL = "witx"
-OFFICIAL_SOURCE = "https://github.com/FoLAWy-py/witx-plugins.git"
+OFFICIAL = "witx-preview"
+OFFICIAL_SOURCE = "https://github.com/FoLAWy-py/witx-plugins-preview.git"
 MARKETPLACE = ".witx-plugin/marketplace.json"
 LOCAL = "local"  # the marketplace in the plugins folder itself
 MINE = "my"  # its plugin: the person's own skills, ``my:<name>``

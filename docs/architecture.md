@@ -46,4 +46,6 @@ cli → api → hub / worker → harness → services → store / models / objec
 
 Plugin 只含文本和元数据，不执行代码、不授予权限。安装锁定 commit 与文件摘要；不兼容当前工具或效果的 Skill 不加载。本人写的 Skill 通过本机 marketplace 保存，Agent 可以起草，由用户检查和保存。
 
+内置 marketplace 名称是 `witx-preview`，来源为 `https://github.com/FoLAWy-py/witx-plugins-preview.git`；未指定来源的 `witx plugin install basics` 使用它。安装和更新仍要求用户检查并确认。
+
 已知安全边界和 Preview 限制见 [README](../README.md#preview-的已知限制)。
