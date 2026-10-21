@@ -170,6 +170,8 @@ class Deps:
                 request=name,
                 digest=digest,
             )
+            if stored.response is None:
+                raise Rejected("not_found", "what this request was about has been deleted")
             return model.model_validate(stored.response)
         result = await write()
         await idempotency.put(

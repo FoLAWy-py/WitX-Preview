@@ -319,8 +319,8 @@ def decide_policy(
     opens one: the search only reads, and runs in every mode. In ``ask``,
     opening a match below the best one (``found_rank`` > 0) waits, so the user confirms
     that choice; the best match opens, as an app the agent knew does. In ``auto`` and
-    ``full`` the agent opens whichever match it chose: opening an app changes nothing, and every
-        input in it is judged on its own.
+    ``full`` the agent opens whichever match it chose: opening an app changes nothing,
+    and every input in it is judged on its own.
 
     An input that answers a system permission prompt: ``ask`` holds every answer,
     declining included; ``auto`` and ``full`` let a decline run, and let an allow run when it
@@ -520,8 +520,10 @@ def _same_input(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
         return abs(float(a["y"]) - float(b["y"])) <= LOOP_Y_TOLERANCE and a.get("value") == b.get(
             "value"
         )
-    if kind == "type_text":
-        return a.get("text") == b.get("text")
+    if kind == "type_text":  # typed another way is trying something else
+        return a.get("text") == b.get("text") and (a.get("method") or "set") == (
+            b.get("method") or "set"
+        )
     return a.get("app_id") == b.get("app_id")
 
 
@@ -637,6 +639,43 @@ def typed_text_shown(typed: str, field: str) -> bool:
         return digits in re.sub(r"\D", "", field)
     plain = [re.sub(r"[\W_]+", "", t.casefold()) for t in (typed, field)]
     return plain[0] in plain[1]
+
+
+# Why typing on the keyboard or pasting stopped short, told to the agent.
+_TYPING_STOPPED = {
+    "no_candidate": "The keyboard offered no candidate showing the next characters, so "
+    "typing stopped there; field_shows has what went in.",
+    "not_on_keyboard": "A character of the text is not on the keyboard, so typing stopped "
+    "there. Type the rest with method 'paste', or without that character.",
+    "no_pinyin_keyboard": "Nothing was typed: the phone has no Chinese pinyin keyboard. "
+    "Use method 'paste', or ask the user to add the keyboard.",
+    "no_keyboard": "Nothing was typed: no on-screen keyboard is up. Tap the field first.",
+    "too_long_for_keys": "Nothing was typed: that is too long to tap in. Use 'paste'.",
+    "field_not_empty": "Nothing was pasted: the field holds text. Paste with replace true, "
+    "or type with another method.",
+    "no_paste_menu": "Nothing was pasted: the field showed no Paste in its menu.",
+    "pasteboard_not_set": "Nothing was pasted: the text could not be put on the phone's "
+    "pasteboard. Type it with method 'keys'.",
+    "paste_not_taken": "Paste was tapped, but the field did not take the text. If the new "
+    "screenshot does not show it, type it with method 'keys'.",
+    "field_not_cleared": "Nothing was typed: what the field held could not all be deleted; "
+    "field_shows has what is left. Empty the field yourself, then type with replace false.",
+}
+
+
+def typing_note(method: str, problem: str | None, read_back: bool) -> str | None:
+    """What the agent is told after typing: why it stopped short, or that the field
+    could not be read back after text was set, which is how a box that closes when text
+    is set into it shows."""
+    if problem in _TYPING_STOPPED:
+        return _TYPING_STOPPED[problem]
+    if method == "set" and not read_back and problem is None:
+        return (
+            "The field could not be read back after typing: it may have closed and lost the "
+            "text. If the new screenshot does not show your text, open the field again and "
+            "type it with method 'keys' (or 'paste')."
+        )
+    return None
 
 
 # A completion refused because the goal is not met this many times in a run; the

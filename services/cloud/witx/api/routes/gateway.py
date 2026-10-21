@@ -14,7 +14,8 @@ from witx.api.deps import (
     bearer,
 )
 from witx.domain.model import ObservationStatus
-from witx.hub import MAX_SCREENSHOT_BYTES, GatewayRemoved, png_size, screenshot_key
+from witx.hub import MAX_SCREENSHOT_BYTES, GatewayRemoved, png_size
+from witx.objects import screenshot_key
 from witx.services import identity
 from witx.store import devices, execution
 

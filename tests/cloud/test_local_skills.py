@@ -407,6 +407,26 @@ async def test_a_task_started_with_skill_writes_one_and_changes_nothing(
     assert len(await drafted(rig, task.id)) == 1
 
 
+async def test_a_task_asked_to_split_into_two_skills_drafts_both_for_the_person_to_save(
+    drafting: tuple[Rig, Installed],
+) -> None:
+    rig, store = drafting
+    rig.model.script = [
+        lambda r: draft(
+            name="open-settings",
+            description="Open Settings, up to its first page.",
+            body="Open Settings with `launch_app`. Then my:open-wifi.",
+        ),
+        lambda r: draft(description="From Settings' first page, open the Wi-Fi settings."),
+        complete,
+    ]
+    task = await rig.create_task("/skill Open the Wi-Fi settings, as two skills")
+    await rig.settle()
+    shown = await drafted(rig, task.id)
+    assert [s["name"] for s in shown] == ["my:open-settings", "my:open-wifi"]
+    assert store.skills() == {}
+
+
 async def test_a_task_cannot_start_with_skill_alone(drafting: tuple[Rig, Installed]) -> None:
     rig, _ = drafting
     with pytest.raises(rules.Rejected, match="what the skill is for"):

@@ -203,6 +203,8 @@ const zh: Record<MessageKey, Catalog[string]> = {
   "kind.tap": "点按",
   "kind.type_text": "输入文字",
   "kind.type_text_replace": "替换文字",
+  "kind.type_text_keys": "逐键输入",
+  "kind.type_text_paste": "粘贴文字",
   "md.code": "代码",
   "md.copied": "已复制",
   "message.copied": "已复制",
@@ -832,6 +834,7 @@ const zh: Record<MessageKey, Catalog[string]> = {
   "skillDraft.replaces": "保存后会替换你的 {name}。",
   "skillDraft.saved": "已保存为 {name} · v{version}",
   "skillDraft.ownersOnly": "只有 Owner 能保存 Skill。",
+  "skillDraft.superseded": "已重新起草",
   "skillDraft.try": "试一次（计划模式）",
   "skillDraft.try.title": "试用 {name}",
   "skillDraft.try.help":

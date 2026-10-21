@@ -136,7 +136,10 @@ def describe_input(payload: Mapping[str, Any]) -> str:
             if payload.get("replace")
             else "type this text into the focused field"
         )
-        return f"{how}: " + json.dumps(payload["text"], ensure_ascii=False)
+        way = {"keys": " by tapping the keyboard", "paste": " by pasting it"}.get(
+            str(payload.get("method")), ""
+        )
+        return f"{how}{way}: " + json.dumps(payload["text"], ensure_ascii=False)
     if kind == "select_option":
         return (
             f"scroll the list at pixel ({payload['x']:.0f}, {payload['y']:.0f}) until the "

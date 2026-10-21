@@ -130,8 +130,8 @@ def _skill_as_read(text: str) -> str:
         return _plan_as_read(text)
     return (
         "The user asks you to keep how this task was done as a skill: draft it with "
-        "draft_skill from what worked, then finish with complete_task."
-        + (f" They add: {wish}" if wish else "")
+        "draft_skill from what worked (one call for each skill, if they ask for several), "
+        "then finish with complete_task." + (f" They add: {wish}" if wish else "")
     )
 
 
@@ -173,9 +173,9 @@ WRITING_SKILL = (
     + LOOKING
     + " in this task. Look in the apps as far as you need to know how it is done (where "
     "each control is, what each screen asks, what changes from one time to the next), ask "
-    "with ask_user what only the user can tell, then call draft_skill and finish with "
-    "complete_task, saying what you drafted. When they tell you what to change, draft it "
-    "again."
+    "with ask_user what only the user can tell, then call draft_skill (once for each skill, "
+    "if they want it split into several) and finish with complete_task, saying what you "
+    "drafted. When they tell you what to change, draft it again."
 )
 
 # The most inputs of a task listed for a skill: the latest.
@@ -654,11 +654,29 @@ def latest_plan(steps: Sequence[Step]) -> list[dict[str, str]]:
     return []
 
 
+def loaded_skills(steps: Sequence[Step]) -> list[str]:
+    """The skills load_skill gave the agent in these steps, each once, as loaded: their
+    text is in the call's result, which a summary does not keep."""
+    found: dict[str, str] = {}
+    for step in steps:
+        for item in step.input_items:
+            if item.get("type") != "function_call_output":
+                continue
+            try:
+                output = json.loads(item.get("output") or "{}")
+            except ValueError:
+                continue
+            if isinstance(output, dict) and output.get("status") == "loaded":
+                found[str(output.get("name"))] = str(output.get("version"))
+    return [f"{name} (v{version})" for name, version in found.items()]
+
+
 def summary_block(
     summary: RunSummary,
     notes: Sequence[str],
     unknown: Sequence[str],
     plan: Sequence[Mapping[str, str]] = (),
+    skills: Sequence[str] = (),
 ) -> str:
     parts = [
         f"[Earlier in this run, up to step {summary.through_seq}, summarized by WitX from "
@@ -674,6 +692,11 @@ def summary_block(
         )
     if notes:
         parts.append("What you wrote down in notes, word for word:\n" + "\n".join(notes))
+    if skills:
+        parts.append(
+            "Skills you loaded, whose text the summary leaves out: load one again with "
+            "load_skill before you follow it further.\n" + "\n".join(f"- {k}" for k in skills)
+        )
     if unknown:
         parts.append(
             "Inputs whose effect is still unknown (no input on that phone until a person "
@@ -687,9 +710,9 @@ def history(
 ) -> list[dict[str, Any]]:
     """The run's conversation so far. With a summary, the steps it covers give way
     to it: the first step (the task as the run began) stays, every message from the user
-    stays word for word, and so do the notes the agent wrote; the summarized step's own
-    output stays too, so each tool call keeps its result. The steps themselves stay
-    stored."""
+    stays word for word, and so do the notes the agent wrote; the skills it loaded are
+    named, to load again; the summarized step's own output stays too, so each tool call
+    keeps its result. The steps themselves stay stored."""
     covered = [
         s
         for s in steps[1:]
@@ -704,7 +727,11 @@ def history(
     first = steps[0]
     items = list(first.input_items)
     block = summary_block(
-        summary, written_notes([first, *covered]), unknown, latest_plan([first, *covered])
+        summary,
+        written_notes([first, *covered]),
+        unknown,
+        latest_plan([first, *covered]),
+        loaded_skills([first, *covered]),
     )
     items.append(_user(_text(block)))
     items.extend(i for s in covered for i in s.input_items if _is_update(i))

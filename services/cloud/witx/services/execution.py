@@ -534,6 +534,16 @@ async def resolve_action_call(conn: AsyncConnection, action_id: UUID) -> None:
             )
         if action.field_info and action.field_info.get("name") and action.reason != "wrong_field":
             output["typed_into"] = action.field_info["name"]
+        if action.kind == "type_text" and action.effect == Effect.UNVERIFIED:
+            note = rules.typing_note(
+                str(action.input.get("method") or "set"),
+                action.reason,
+                action.field_text is not None or bool(action.field_info),
+            )
+            if note:
+                output["note"] = note
+                if action.field_text is not None:
+                    output["field_shows"] = action.field_text
         if action.kind == "select_option":
             if action.field_text:
                 output["selected"] = action.field_text

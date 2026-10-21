@@ -1,8 +1,11 @@
 """Request logs, correlated logs from the worker, and /metrics ."""
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -10,7 +13,9 @@ from witx.api.app import create_app
 from witx.api.auth import DevAuthenticator
 from witx.config import Settings
 from witx.objects import LocalObjectStore, ObjectStore
+from witx.services import retention
 from witx.store.db import Database
+from witx.worker import sweep_forever
 
 from tests.cloud.rig import Rig
 from tests.cloud.support import call, device_info, provision
@@ -121,6 +126,82 @@ async def test_metrics_report_outcomes_effects_latency_and_devices_per_tenant(
 class FullDisk(LocalObjectStore):
     async def put(self, key: str, data: bytes, content_type: str) -> None:
         raise OSError("No space left on device")
+
+
+async def test_a_screenshot_sweep_is_logged_and_measured_with_what_it_could_not_delete(  # type: ignore[no-untyped-def]
+    rig: Rig, web: httpx.AsyncClient, log_lines: Lines, monkeypatch
+) -> None:
+    await finish_a_task(rig)
+    prefix = f"{rig.tenant.id}/observations"
+    stuck = f"{prefix}/{uuid4()}.png"
+    for key in (f"{prefix}/{uuid4()}.png", stuck, f"{prefix}/notes.txt"):
+        await rig.objects.put(key, b"png", "image/png")
+    delete = rig.objects.delete
+
+    async def unreachable(key: str) -> None:
+        if key == stuck:
+            raise OSError("object store unavailable")
+        await delete(key)
+
+    monkeypatch.setattr(rig.objects, "delete", unreachable)
+    swept = await retention.sweep_screenshots(rig.db, rig.objects)
+    assert (swept.deleted, swept.failed, swept.skipped_unrecognized) == (1, 1, 1)
+    assert swept.skipped_held > 0 and swept.scanned == swept.skipped_held + 3  # the task's
+
+    (line,) = [entry for entry in log_lines() if entry["msg"] == "screenshot sweep"]
+    assert line["level"] == "warning" and line["tenant_id"] == str(rig.tenant.id)
+    assert {k: line[k] for k in swept.counts()} == swept.counts() and "duration_ms" in line
+    (failure,) = [entry for entry in log_lines() if entry["msg"] == "screenshot not deleted"]
+    assert failure["observation_id"] in stuck and failure["error_code"] == "OSError"
+    body = (await web.get("/metrics", headers={"Authorization": f"Bearer {METRICS}"})).text
+    for result, n in swept.counts().items():
+        assert f'witx_screenshot_sweep_objects{{tenant="acme",result="{result}"}} {n}' in body
+    assert 'witx_screenshot_sweep_age_seconds{tenant="acme",outcome="ok"}' in body
+
+
+async def test_a_sweep_that_cannot_list_is_recorded_as_an_error_and_the_next_tenant_is_swept(  # type: ignore[no-untyped-def]
+    rig: Rig, web: httpx.AsyncClient, admin_db: Database, log_lines: Lines, monkeypatch
+) -> None:
+    other = await provision(admin_db, "beta")
+    orphan = f"{other.id}/observations/{uuid4()}.png"
+    await rig.objects.put(orphan, b"png", "image/png")
+    listing = rig.objects.list
+
+    async def broken_for_acme(prefix: str) -> list[str]:
+        if prefix.startswith(str(rig.tenant.id)):
+            raise OSError("object store unavailable")
+        return await listing(prefix)
+
+    monkeypatch.setattr(rig.objects, "list", broken_for_acme)
+    swept = await retention.sweep_screenshots(rig.db, rig.objects)
+    assert swept.error == "OSError" and swept.deleted == 1
+    stopped = [entry for entry in log_lines() if entry["msg"] == "screenshot sweep stopped"]
+    assert stopped and stopped[0]["tenant_id"] == str(rig.tenant.id) and "error" in stopped[0]
+    body = (await web.get("/metrics", headers={"Authorization": f"Bearer {METRICS}"})).text
+    assert 'witx_screenshot_sweep_age_seconds{tenant="acme",outcome="error"}' in body
+    assert 'witx_screenshot_sweep_objects{tenant="beta",result="deleted"} 1' in body
+
+
+async def test_a_failing_sweep_is_retried_and_never_stops_the_worker(  # type: ignore[no-untyped-def]
+    rig: Rig, monkeypatch
+) -> None:
+    tries = 0
+
+    async def unavailable(prefix: str) -> list[str]:
+        nonlocal tries
+        tries += 1
+        raise OSError("object store unavailable")
+
+    monkeypatch.setattr(rig.objects, "list", unavailable)
+    stop = asyncio.Event()
+    sweeping = asyncio.create_task(
+        sweep_forever(rig.db, rig.objects, stop, retry=timedelta(milliseconds=20))
+    )
+    while tries < 3:
+        await asyncio.sleep(0.01)
+    assert not sweeping.done()
+    stop.set()
+    await asyncio.wait_for(sweeping, 5)  # returns, raising nothing
 
 
 async def test_the_api_is_ready_only_while_its_database_and_object_store_work(

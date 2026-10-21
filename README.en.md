@@ -19,7 +19,7 @@ Browser ── HTTPS / SSE ── API + Hub ── PostgreSQL
 - Conversational tasks, plan mode, model switching, scheduled tasks, and subtasks across multiple devices.
 - Three permission modes, independent risk assessment, approval of specific actions, and execution audit records.
 - Pause, stop, manual takeover, and state recovery after disconnects or process restarts.
-- Long-term memory, user-authored Skills, and Plugins with reviewable versions and contents.
+- Long-term memory, user-authored Skills (including splitting one task into multiple Skills), and Plugins with reviewable versions and contents.
 - English and Simplified Chinese, with light and dark themes.
 
 ## Prerequisites
@@ -62,6 +62,8 @@ make dev-gateway GATEWAY_CONFIG=gateway.toml
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173), sign in with the development token `dev-token-alice` from `.env.example`, and enable the fake device on the Devices page. The fake device only checks the service connection: each input changes the color of a synthetic screen. It does not simulate real apps.
 
+iOS text input uses the driver by default. For fields that reject it, the agent can choose on-screen key taps or Paste from the field's menu. Typing Chinese with key taps requires a Simplified Chinese pinyin keyboard on the phone. See [Development and deployment](docs/development.md#ios-文字输入) (Chinese) for configuration and limits.
+
 For real devices, see [gateway.example.toml](services/gateway/gateway.example.toml). Plugins are optional: `uv run witx plugin install basics` fetches content from the [public marketplace](https://github.com/FoLAWy-py/witx-plugins-preview), displays it for review, and installs it after confirmation. The built-in source is named `witx-preview`; `uv run witx plugin install basics@witx-preview` selects it explicitly. There is no need to add the marketplace first. Plugins have their own license notices.
 
 ## Known Preview limitations
@@ -69,7 +71,7 @@ For real devices, see [gateway.example.toml](services/gateway/gateway.example.to
 - Before an input, the Gateway checks device identity, dimensions, rotation, and the foreground app. Page content can still change within the same app, making earlier coordinates invalid.
 - Agent input is rejected for fields the operating system identifies as secure. Ordinary plain-text verification-code fields, custom controls, and verification codes visible in screenshots are not fully protected. Use test devices. Pause and take over manually for passwords, verification codes, and payment verification, and keep that information out of model context.
 - A fresh screenshot can serve as completion evidence, but does not guarantee that every task requirement has been met. Check important results manually.
-- A deleted task's tombstone may still retain its title. Saved memories, Skills, and existing backups have separate lifecycles. Do not put private information requiring strict erasure into this Preview.
+- Deleting a task clears its title, pins, related content, and stored responses, and removes its screenshots. Saved memories, Skills, and existing backups have separate lifecycles; deleting a task does not automatically remove them.
 - Gateway hosts support macOS and Linux. Windows has not been validated. Real-device behavior also depends on Appium, drivers, signing, and the apps themselves.
 
 The policy requires approval of specific payment and transfer actions. Keep human supervision when using real accounts or running tasks with external side effects. Development tokens are for local testing only; configure OIDC and HTTPS for externally accessible deployments.

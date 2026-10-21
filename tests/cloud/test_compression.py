@@ -179,6 +179,18 @@ def test_the_plan_stays_word_for_word_when_earlier_steps_are_summarized() -> Non
     assert "- [in_progress] Read the version" in text
 
 
+def test_the_skills_loaded_before_a_summary_are_named_to_load_again() -> None:
+    loaded = {"status": "loaded", "name": "my:open-wifi", "version": "0.1.3", "content": "…"}
+    refused = {"status": "rejected", "code": "unknown_skill"}
+    steps = [turn(1), turn(2), turn(3), turn(4), turn(5)]
+    steps[1].input_items[0]["output"] = json.dumps(loaded)
+    steps[2].input_items[0]["output"] = json.dumps(refused)
+    summary = RunSummary(uuid4(), uuid4(), 4, "Opened Settings.", now())
+    block = context.history(steps, summary)[1]["content"][0]["text"]
+    assert "load one again with load_skill" in block
+    assert "- my:open-wifi (v0.1.3)" in block and "unknown_skill" not in block
+
+
 async def test_the_task_shows_the_newest_plan_and_what_the_agent_wrote_down(
     db: Database, admin_db: Database, tmp_path: Path
 ) -> None:

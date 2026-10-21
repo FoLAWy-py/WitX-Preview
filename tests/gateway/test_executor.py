@@ -896,6 +896,27 @@ async def test_a_replacement_refused_for_a_secure_field_empties_nothing(tmp_path
     assert (h.device.inputs, device.field) == ([], "hunter2")
 
 
+async def test_a_way_of_typing_the_phone_lacks_is_refused_before_any_input(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path, FakeDevice(type_methods=frozenset({"set", "paste"})))
+    await h.executor.action(h.action(input={"kind": "type_text", "text": "你好", "method": "keys"}))
+    result = h.results()[0]
+    assert (result["outcome"], result["reason"]) == ("rejected", "unsupported_method")
+    assert h.device.inputs == []
+
+
+async def test_typing_that_stops_short_says_why_and_the_field_is_still_read_back(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path, FakeDevice(field="你好", typing_stops="no_candidate"))
+    await h.executor.action(h.action(input={"kind": "type_text", "text": "世界", "method": "keys"}))
+    result = h.results()[0]
+    assert (result["outcome"], result["reason"]) == ("returned", "no_candidate")
+    assert result["field_text"] == "你好"
+    assert h.device.typed_with == ["keys"]
+
+
 async def test_typing_without_a_field_point_is_not_checked(tmp_path: Path) -> None:
     # A person who took the phone over names no field; neither does an older caller.
     h = Harness(tmp_path, FakeDevice(field_box=(100, 200, 300, 40)))

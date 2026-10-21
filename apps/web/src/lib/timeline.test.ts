@@ -340,6 +340,29 @@ describe("timeline", () => {
     ]);
   });
 
+  it("offers to save only a skill's newest draft, each skill on its own", () => {
+    const drafted = (seq: number, name: string) => ({
+      seq,
+      type: "skill.drafted",
+      data: { name, description: "d", apps: [], body: "b" },
+      created_at: `2026-10-10T10:00:0${seq}Z`,
+    });
+    const items = buildTimeline(task, [
+      drafted(1, "my:open-settings"),
+      drafted(2, "my:open-wifi"),
+      drafted(3, "my:open-wifi"),
+    ]);
+    expect(
+      items.flatMap((i) =>
+        i.kind === "skill" ? [[i.draft.name, i.superseded]] : [],
+      ),
+    ).toEqual([
+      ["my:open-settings", false],
+      ["my:open-wifi", true],
+      ["my:open-wifi", false],
+    ]);
+  });
+
   it("finds the newest screenshot per device", () => {
     expect(latestScreens(task)).toEqual(
       new Map([

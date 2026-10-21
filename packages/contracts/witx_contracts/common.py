@@ -42,6 +42,8 @@ Problem = Literal[
 
 # Coordinates are pixels in the screenshot the model was shown.
 Coordinate = Annotated[float, Field(ge=0, le=16384)]
+# How text goes into a field: set into it, tapped on the keyboard, or pasted.
+TypeMethod = Literal["set", "keys", "paste"]
 
 
 class Tap(Wire):
@@ -131,13 +133,16 @@ class TypeText(Wire):
     inside it, as on the screenshot) and the Gateway refuses to type when the focused
     field is somewhere else; a person taking over names no field. With ``replace``
     the field is cleared first, so the text replaces what it held; without, the
-    text goes in at the cursor."""
+    text goes in at the cursor. ``method`` is how it goes in: set into the field,
+    tapped on the on-screen keyboard (for a box that closes on any other way), or pasted
+    through the field's own menu."""
 
     kind: Literal["type_text"] = "type_text"
     text: str = Field(min_length=1, max_length=2000)
     field_x: Coordinate | None = None
     field_y: Coordinate | None = None
     replace: bool = False
+    method: TypeMethod = "set"
 
     @model_validator(mode="after")
     def _both_or_neither(self) -> "TypeText":

@@ -67,6 +67,20 @@ Compose 提供 PostgreSQL、迁移、API / Hub、Worker 和 Nginx。按 `deploy/
 
 截图和 Plugin 默认在私有卷；可配置 S3 兼容对象存储。API 的 `/health/ready` 检查数据库和对象存储，`witx check` 额外检查模型目录可用性；模型列表可用不保证每次推理成功。日志默认结构化并脱敏，`/metrics` 需要配置 token。扩展 API 实例时，人工接管和 MCP 会话需要粘性路由。
 
+## iOS 文字输入
+
+`type_text` 的 `method` 默认是 `set`（驱动写入）；不接受这种方式的输入框可以用 `keys`（点击屏幕键盘）或 `paste`（通过输入框自己的粘贴菜单）。这些是同一动作的输入方式，仍受安全字段、焦点、截图和审批检查约束。Android 当前只支持默认方式。
+
+逐键输入最多 300 个字符，不支持换行、制表符或部分非 BMP 字符（如 emoji）；中文需要在手机上启用简体拼音键盘，候选不匹配会停止并报告已输入的内容。粘贴由 Gateway 所在的 Mac 写入并核对设备剪贴板，结束后清空；真机需要 iOS 17+ 的 devicectl 支持。不要用这些方式输入密码、验证码或支付验证信息。
+
+iOS WebDriverAgent 需要恢复时，Gateway 停止它的进程并由新会话重新启动，保留已安装的 App 和签名信任。
+
+## 截图留存与监控
+
+任务删除会清除标题、置顶、相关内容和可重放响应，并删除对应截图；迁移也会清理此前已删除任务残留的标题与置顶。独立清扫循环会删除没有观察记录认领的截图对象，保留仍在上传、未结束或 UNKNOWN 相关的证据。已保存记忆、Skill、恢复账本和备份有各自的保留规则。
+
+设置 `WITX_METRICS_TOKEN` 后，内部 `/metrics` 提供 `witx_screenshot_sweep_objects`、`witx_screenshot_sweep_age_seconds` 和 `witx_screenshot_sweep_seconds`。Prometheus 告警模板见 [alerts.yml](../deploy/prometheus/alerts.yml)，通过 `rule_files` 加载；包含超过 26 小时未清扫、持续 3 小时失败及持续 2 小时指标缺失三类告警。Prometheus 需要访问内部 API 网络；Nginx 默认不对外暴露 `/metrics`。请自行配置抓取令牌和告警接收方，避免把凭据提交到仓库。
+
 ## Preview 插件源
 
 内置源 `witx-preview` 对应公开仓库 `https://github.com/FoLAWy-py/witx-plugins-preview.git`，不需要手动添加。安装、查看和更新：

@@ -212,6 +212,8 @@ const en = {
   "kind.tap": "Tap",
   "kind.type_text": "Type text",
   "kind.type_text_replace": "Replace text",
+  "kind.type_text_keys": "Tap in text",
+  "kind.type_text_paste": "Paste text",
   "md.code": "code",
   "md.copied": "Copied",
   "message.copied": "Copied",
@@ -878,6 +880,7 @@ const en = {
   "skillDraft.replaces": "Saving it replaces your {name}.",
   "skillDraft.saved": "Saved as {name} · v{version}",
   "skillDraft.ownersOnly": "Only an owner saves skills.",
+  "skillDraft.superseded": "redrafted",
   "skillDraft.try": "Try it (plan mode)",
   "skillDraft.try.title": "Try {name}",
   "skillDraft.try.help":

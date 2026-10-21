@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 
 import httpx
 from PIL import Image, UnidentifiedImageError
-from witx_contracts.common import Capability, Platform
+from witx_contracts.common import Capability, Platform, TypeMethod
 
 from witx_gateway.devices.appium import AppiumDevice, Identities
 from witx_gateway.devices.base import DeviceError, TextField
@@ -36,6 +36,9 @@ class AndroidDevice(AppiumDevice):
     platform: Platform = "android"
     swipe_coasts = True
     settles_on_its_own = True  # waitForIdleTimeout below
+    # Text is always pasted: "paste" is what "set" does. No keys: a key at a time
+    # loses characters in fields that format as they go.
+    type_methods: frozenset[TypeMethod] = frozenset({"set", "paste"})
     _name_attributes = ("hint", "content-desc", "resource-id")
     # No picker capability: Android pickers are ordinary scrolling lists or text fields.
     _capabilities: ClassVar[list[Capability]] = [
@@ -115,7 +118,10 @@ class AndroidDevice(AppiumDevice):
             raise DeviceError("secure_field")
         await self._check_field_at(element_id, point)
 
-    async def type_text(self, text: str, *, replace: bool = False) -> None:
+    async def type_text(
+        self, text: str, *, replace: bool = False, method: TypeMethod = "set"
+    ) -> str | None:
+        # "set" pastes here too: typing in key by key loses characters.
         element_id = await self._focused_element()  # never type without a focused field
         before = await self._field_text(element_id)
         if replace:
@@ -133,6 +139,7 @@ class AndroidDevice(AppiumDevice):
         shown = before.strip() == text.strip() if replace else text.strip() in before
         if not shown and await self._field_text(element_id) == before:
             await self._script("mobile: type", {"text": text})
+        return None
 
     async def _field_text(self, element_id: str) -> str:
         return str(await self._session_call("GET", f"/element/{element_id}/text") or "")

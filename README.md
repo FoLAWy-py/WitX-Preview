@@ -19,7 +19,7 @@ WitX 是供个人自部署、自用的手机操作 Agent。你在网页里提出
 - 对话任务、计划模式、多模型切换、定时任务与多设备子任务。
 - 三档权限模式、独立风险判定、具体动作审批与执行审计。
 - 暂停、停止、人工接管，以及断线和进程重启后的状态恢复。
-- 长期记忆、自己编写的 Skill，以及可检查版本和内容的 Plugin。
+- 长期记忆、自己编写的 Skill（可将一个任务拆成多个 Skill），以及可检查版本和内容的 Plugin。
 - 英文 / 简体中文、浅色 / 深色界面。
 
 ## 开始前
@@ -62,6 +62,8 @@ make dev-gateway GATEWAY_CONFIG=gateway.toml
 
 打开 http://127.0.0.1:5173，以 `.env.example` 中的开发令牌 `dev-token-alice` 登录，在设备页启用假设备。假设备仅用于检查链路，每次输入只改变合成画面的颜色，不模拟真实 App。
 
+iOS 输入默认使用驱动写入；遇到不接受该方式的输入框，可由 Agent 选择逐键输入或通过输入框菜单粘贴。逐键输入中文需要手机有简体拼音键盘，适用范围与配置见 [开发与部署](docs/development.md#ios-文字输入)。
+
 真实设备配置见 [gateway.example.toml](services/gateway/gateway.example.toml)。Plugin 可选：`uv run witx plugin install basics` 会从[公开 marketplace](https://github.com/FoLAWy-py/witx-plugins-preview)获取并展示内容，确认后安装；内置源名称为 `witx-preview`，也可显式运行 `uv run witx plugin install basics@witx-preview`，无需先添加 marketplace。Plugin 具有独立的许可声明。
 
 ## Preview 的已知限制
@@ -69,7 +71,7 @@ make dev-gateway GATEWAY_CONFIG=gateway.toml
 - Gateway 输入前核对设备身份、尺寸、旋转和前台 App，同一个 App 内的页面内容变化仍可能让旧坐标失效。
 - 系统标识的安全输入框会拒绝 Agent 输入；普通明文验证码框、自绘控件以及截图中显示的验证码尚未得到完整保护。请在测试设备上使用，涉及密码、验证码和支付验证时暂停并人工接管，避免把这些内容交给模型。
 - 新截图可以作为完成证据，但不能保证任务的每个要求都已满足。关键结果需要人工检查。
-- 删除任务后的墓碑目前仍可能保留任务标题；已保存的记忆、Skill 和既有备份有独立生命周期。Preview 中请勿放入需要严格清除的私密内容。
+- 删除任务会清除标题、置顶、相关内容及存储的响应，并清理对应截图；已保存的记忆、Skill 和既有备份有独立生命周期，删除任务不会自动删除它们。
 - Gateway 宿主支持 macOS 和 Linux；Windows 尚未验收。真实设备仍受 Appium、驱动、签名和 App 行为影响。
 
 付款和转账按策略要求对具体动作批准。对真实账户和有外部副作用的任务，请保持人工监督。开发令牌只用于本机测试；对外部署请配置 OIDC 与 HTTPS。

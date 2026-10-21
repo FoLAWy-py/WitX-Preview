@@ -43,6 +43,7 @@ from witx.worker import (
     relay_forever,
     schedule_forever,
     side_chat_forever,
+    sweep_forever,
     title_forever,
 )
 
@@ -189,6 +190,7 @@ async def _run_worker(concurrency: int) -> None:
                 screenshot_retention=settings.screenshot_retention,
                 audit_retention=settings.audit_retention,
             ),
+            sweep_forever(db, objects, stop),
             schedule_forever(db, stop),
             title_forever(db, model, settings.default_model, stop),
             side_chat_forever(db, model, objects, stop),

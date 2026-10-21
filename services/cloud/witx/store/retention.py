@@ -76,9 +76,11 @@ async def tasks_to_purge(conn: AsyncConnection, limit: int) -> list[UUID]:
     return [r["id"] for r in rows]
 
 
-async def lock_for_purge(conn: AsyncConnection, task_id: UUID) -> list[str] | None:
-    """Locks a deleted, unpurged task and its screenshots (so nothing completes them
-    meanwhile). Returns their object keys, or None if another worker has it."""
+async def lock_for_purge(conn: AsyncConnection, task_id: UUID) -> list[UUID] | None:
+    """Locks a deleted, unpurged task and its observations (so nothing completes them
+    meanwhile). Returns their ids, or None if another worker has it. All of them, not
+    only those with a screenshot on record: one whose upload failed its check still has
+    the uploaded object."""
     task = await fetch_one(
         conn,
         """SELECT 1 FROM tasks WHERE id = :t AND deleted_at IS NOT NULL AND purged_at IS NULL
@@ -89,10 +91,10 @@ async def lock_for_purge(conn: AsyncConnection, task_id: UUID) -> list[str] | No
         return None
     rows = await fetch(
         conn,
-        "SELECT object_key FROM observations WHERE task_id = :t FOR UPDATE",
+        "SELECT id FROM observations WHERE task_id = :t FOR UPDATE",
         t=task_id,
     )
-    return [r["object_key"] for r in rows if r["object_key"]]
+    return [r["id"] for r in rows]
 
 
 async def purge_task_rows(conn: AsyncConnection, task_id: UUID, now: datetime) -> None:
@@ -100,6 +102,16 @@ async def purge_task_rows(conn: AsyncConnection, task_id: UUID, now: datetime) -
     model and the audit summary."""
     task_runs = "(SELECT id FROM runs WHERE task_id = :t)"
     for statement in (
+        # A stored response repeats the task's text. A retry of that request is told the
+        # task is gone (rather than the key being dropped, which would let a late retry
+        # create the task again).
+        """UPDATE idempotency_keys SET response = 'null'::jsonb
+            WHERE response->>'id' = CAST(:t AS text)
+               OR split_part(request, '/', 5) IN (
+                    SELECT CAST(:t AS text)
+                    UNION ALL SELECT CAST(id AS text) FROM actions WHERE task_id = :t
+                    UNION ALL SELECT CAST(id AS text) FROM purchase_intents WHERE task_id = :t
+                    UNION ALL SELECT CAST(id AS text) FROM grants WHERE task_id = :t)""",
         "DELETE FROM approvals WHERE action_id IN (SELECT id FROM actions WHERE task_id = :t)",
         "DELETE FROM grants WHERE task_id = :t",
         # Kept memories stay the person's, also what an agent kept on its own;
@@ -118,12 +130,13 @@ async def purge_task_rows(conn: AsyncConnection, task_id: UUID, now: datetime) -
         "DELETE FROM observations WHERE task_id = :t",
         "DELETE FROM events WHERE task_id = :t",
         "DELETE FROM side_messages WHERE task_id = :t",
+        "DELETE FROM task_pins WHERE task_id = :t",
     ):
         await execute(conn, statement, t=task_id)
     await execute(
         conn,
-        """UPDATE tasks SET goal = '', request = '', constraints = '{}', result = NULL,
-                  purged_at = :now
+        """UPDATE tasks SET goal = '', request = '', title = NULL, constraints = '{}',
+                  result = NULL, purged_at = :now
             WHERE id = :t""",
         t=task_id,
         now=now,
@@ -156,6 +169,40 @@ async def expired_screenshots(
         limit=limit,
     )
     return [(r["id"], r["object_key"]) for r in rows]
+
+
+async def screenshots_held(conn: AsyncConnection, ids: list[UUID]) -> set[UUID]:
+    """Of these observations, those whose screenshot object is still theirs: on record,
+    or not settled yet (its upload may be under way)."""
+    rows = await fetch(
+        conn,
+        """SELECT id FROM observations WHERE id = ANY(:ids)
+              AND (object_key IS NOT NULL OR status IN ('requested', 'sent'))""",
+        ids=ids,
+    )
+    return {r["id"] for r in rows}
+
+
+async def record_sweep(
+    conn: AsyncConnection, tenant_id: UUID, *, finished_at: datetime, counts: dict[str, Any]
+) -> None:
+    """Keeps the tenant's last sweep, for /metrics."""
+    await execute(
+        conn,
+        """INSERT INTO screenshot_sweeps (tenant_id, finished_at, duration_ms, scanned, deleted,
+                  skipped_held, skipped_unrecognized, failed, error)
+           VALUES (:t, :at, :duration_ms, :scanned, :deleted, :skipped_held,
+                   :skipped_unrecognized, :failed, :error)
+           ON CONFLICT (tenant_id) DO UPDATE SET
+                  finished_at = EXCLUDED.finished_at, duration_ms = EXCLUDED.duration_ms,
+                  scanned = EXCLUDED.scanned, deleted = EXCLUDED.deleted,
+                  skipped_held = EXCLUDED.skipped_held,
+                  skipped_unrecognized = EXCLUDED.skipped_unrecognized,
+                  failed = EXCLUDED.failed, error = EXCLUDED.error""",
+        t=tenant_id,
+        at=finished_at,
+        **counts,
+    )
 
 
 async def mark_screenshots_purged(conn: AsyncConnection, ids: list[UUID]) -> None:

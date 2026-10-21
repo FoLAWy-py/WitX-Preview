@@ -35,4 +35,20 @@ describe("kindKey", () => {
     );
     expect(kindKey({ kind: "tap", input: { x: 1, y: 2 } })).toBe("kind.tap");
   });
+
+  it("says when text was tapped in on the keyboard or pasted", () => {
+    const typed = { kind: "type_text" as const, input: { text: "你好" } };
+    expect(kindKey({ ...typed, input: { text: "你好", method: "keys" } })).toBe(
+      "kind.type_text_keys",
+    );
+    expect(
+      kindKey({
+        ...typed,
+        input: { text: "你好", method: "paste", replace: true },
+      }),
+    ).toBe("kind.type_text_paste");
+    expect(kindKey({ ...typed, input: { text: "你好", method: "set" } })).toBe(
+      "kind.type_text",
+    );
+  });
 });

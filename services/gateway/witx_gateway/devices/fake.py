@@ -5,7 +5,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
-from witx_contracts.common import Capability, Platform, Rotation
+from witx_contracts.common import Capability, Platform, Rotation, TypeMethod
 
 from witx_gateway.devices.base import (
     DeviceError,
@@ -60,6 +60,7 @@ class FakeDevice:
     _moving: int = 0  # screenshots left that still show the list moving
     swipe_coasts: bool = True
     settles_on_its_own: bool = True
+    type_methods: frozenset[TypeMethod] = frozenset({"set", "keys", "paste"})
     options: list[str] = dataclasses.field(default_factory=list)  # what select_option finds
     sliders: list[SliderReading] = dataclasses.field(default_factory=list)
     fling_shots: int = 0  # screenshots after a swipe or pinch that still show it moving
@@ -67,6 +68,8 @@ class FakeDevice:
     field_name: str = ""  # what the app calls it
     field_box: tuple[float, float, float, float] | None = None  # where it is
     drop_char: int | None = None  # typing loses the character at this index
+    typed_with: list[str] = dataclasses.field(default_factory=list)  # each type_text's method
+    typing_stops: str | None = None  # typing stops short for this reason, typing nothing
     broadcast: bytes | None = None  # a JPEG its screen broadcast shows; None: it has none
     session_open: bool = True  # False: like a phone whose driver session was lost
     locked: bool = False  # its screen is locked or dark
@@ -135,11 +138,17 @@ class FakeDevice:
         if point is not None and not point_in_box(point, self.field_box):
             raise WrongField(TextField("", self.field_name, self.field_box))
 
-    async def type_text(self, text: str, *, replace: bool = False) -> None:
+    async def type_text(
+        self, text: str, *, replace: bool = False, method: TypeMethod = "set"
+    ) -> str | None:
         await self._input("type_text", text)
+        self.typed_with.append(method)
+        if self.typing_stops is not None:
+            return self.typing_stops
         if self.drop_char is not None:
             text = text[: self.drop_char] + text[self.drop_char + 1 :]
         self.field = text if replace else self.field + text
+        return None
 
     async def read_text_field(self, typed: str = "") -> TextField:
         if self.secure_field:

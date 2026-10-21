@@ -470,12 +470,19 @@ export function Conversation({
               <li key={item.key} className="anim-slide flex gap-3">
                 <span
                   aria-hidden
-                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
+                  className={cn(
+                    "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg",
+                    item.superseded && "invisible",
+                  )}
                 >
                   W
                 </span>
                 <div className="min-w-0 flex-1">
-                  <SkillDraftCard draft={item.draft} task={task} />
+                  <SkillDraftCard
+                    draft={item.draft}
+                    superseded={item.superseded}
+                    task={task}
+                  />
                 </div>
               </li>
             );

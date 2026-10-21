@@ -9,11 +9,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, urlsplit
+from uuid import UUID
 from xml.etree import ElementTree
 
 import httpx
 
 _KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-/.]{0,254}$")
+
+
+def screenshot_key(tenant_id: UUID, observation_id: UUID) -> str:
+    """Where an observation's screenshot is uploaded, whether or not it was accepted."""
+    return f"{tenant_id}/observations/{observation_id}.png"
 
 
 class ObjectNotFound(Exception):

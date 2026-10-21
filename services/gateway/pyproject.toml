@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.28,<0.29",
     "pillow>=11,<13",
     "keyring>=25,<26",
+    "pypinyin>=0.55,<0.56",
 ]
 
 [project.scripts]

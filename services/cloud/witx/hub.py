@@ -23,7 +23,7 @@ from witx.config import Limits
 from witx.domain import rules
 from witx.domain.model import Action, ActionStatus, Device, Observation, ObservationStatus
 from witx.domain.rules import Rejected
-from witx.objects import ObjectNotFound, ObjectStore
+from witx.objects import ObjectNotFound, ObjectStore, screenshot_key
 from witx.services import execution as exec_service
 from witx.services import lifecycle
 from witx.store import devices, execution, runs, tasks
@@ -32,10 +32,6 @@ from witx.store.db import Database
 log = logging.getLogger(__name__)
 
 MAX_SCREENSHOT_BYTES = 20 * 1024 * 1024
-
-
-def screenshot_key(tenant_id: UUID, observation_id: UUID) -> str:
-    return f"{tenant_id}/observations/{observation_id}.png"
 
 
 def png_size(data: bytes) -> tuple[int, int] | None:

@@ -19,10 +19,15 @@ export function effectObject(
   return action.changes || null;
 }
 
-/** What an input is called: typing that empties the field first is a replacement. */
+/** What an input is called: typing that empties the field first is a replacement;
+ * text tapped in on the keyboard or pasted says so. */
 export function kindKey(
   action: Pick<ActionView, "kind" | "input">,
 ): MessageKey {
+  if (action.kind === "type_text" && action.input.method === "keys")
+    return "kind.type_text_keys";
+  if (action.kind === "type_text" && action.input.method === "paste")
+    return "kind.type_text_paste";
   if (action.kind === "type_text" && action.input.replace === true)
     return "kind.type_text_replace";
   return `kind.${action.kind}` as MessageKey;

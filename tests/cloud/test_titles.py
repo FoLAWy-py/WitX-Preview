@@ -7,7 +7,7 @@ from witx.domain import rules
 from witx.models import ModelError, ModelRequest, ModelResponse
 from witx.services import lifecycle, titles
 from witx.store import tasks
-from witx.store.db import Database
+from witx.store.db import Database, execute, fetch_one
 
 from tests.cloud.support import provision
 
@@ -74,3 +74,22 @@ def test_a_title_is_one_clean_line() -> None:
     assert rules.task_title(' "Check the battery." ') == "Check the battery"
     assert rules.task_title("\u201c\u67e5\u7535\u91cf\u201d\u3002") == "\u67e5\u7535\u91cf"
     assert rules.task_title("   ") is None
+
+
+async def test_a_task_deleted_while_it_is_titled_stays_untitled(
+    db: Database, admin_db: Database
+) -> None:
+    _, task = await new_task(db, admin_db, "Open Settings")
+    model = Titler()
+    respond = model.respond
+
+    async def deleted_meanwhile(request: ModelRequest) -> ModelResponse:
+        async with admin_db.system() as conn:
+            await execute(conn, "UPDATE tasks SET deleted_at = now() WHERE id = :t", t=task.id)
+        return await respond(request)
+
+    model.respond = deleted_meanwhile  # type: ignore[method-assign]
+    await titles.title_tasks(db, model, "test-model")
+    async with admin_db.system() as conn:
+        row = await fetch_one(conn, "SELECT title FROM tasks WHERE id = :t", t=task.id)
+    assert row is not None and row["title"] is None

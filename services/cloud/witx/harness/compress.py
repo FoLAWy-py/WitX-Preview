@@ -5,7 +5,8 @@ later requests carry the summary instead of them (context.history). The summary 
 context: it grants nothing, and what it says a screen showed was true then. What must
 not be lost is kept word for word by context.history, not by the summary: the task as
 the run began, every message from the user, the agent's notes, and inputs whose effect
-is unknown. A failed call compresses nothing.
+is unknown; the skills it loaded are named, for the agent to load again. A failed call
+compresses nothing.
 """
 
 import asyncio

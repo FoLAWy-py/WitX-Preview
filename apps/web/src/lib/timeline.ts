@@ -50,7 +50,15 @@ export type TimelineItem =
       text: string;
     }
   | { kind: "plan"; at: string; key: string; text: string }
-  | { kind: "skill"; at: string; key: string; draft: SkillDraft }
+  | {
+      kind: "skill";
+      at: string;
+      key: string;
+      draft: SkillDraft;
+      /** The agent drafted this skill again later in the task: that draft is the one
+       * to save. */
+      superseded: boolean;
+    }
   | { kind: "action"; at: string; key: string; action: ActionView }
   | ({ kind: "status"; at: string; key: string } & Notice)
   | { kind: "proposal"; at: string; key: string; proposal: Proposal }
@@ -97,6 +105,12 @@ export function buildTimeline(
   // chosen (in the same transaction, so it is the very next event) is shown as that
   // takeover's line or on the purchase card.
   const takeoverNotes = new Set<unknown>();
+  // Each skill's newest draft: an earlier one of the same name is not saved over it.
+  const newestDrafts = new Map(
+    events
+      .filter((e) => e.type === "skill.drafted")
+      .map((e) => [String(e.data.name), e.seq]),
+  );
   events.forEach((event, i) => {
     const next = events[i + 1];
     if (
@@ -226,6 +240,7 @@ export function buildTimeline(
         at: event.created_at,
         key,
         draft: event.data as unknown as SkillDraft,
+        superseded: newestDrafts.get(String(event.data.name)) !== event.seq,
       });
     } else if (event.type === "task.plan_mode") {
       items.push({

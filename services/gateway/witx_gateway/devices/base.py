@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from PIL import Image
-from witx_contracts.common import Capability, Platform, Rotation
+from witx_contracts.common import Capability, Platform, Rotation, TypeMethod
 
 from witx_gateway.mjpeg import StreamFrame
 from witx_gateway.sliders import SliderReading
@@ -132,6 +132,11 @@ class Device(Protocol):
         ...
 
     @property
+    def type_methods(self) -> frozenset[TypeMethod]:
+        """The ways it can put text into a field; another is refused before input."""
+        ...
+
+    @property
     def session_open(self) -> bool:
         """Whether the device answers without first opening a driver session (which can take
         minutes). A picture for someone watching a task is not worth opening one."""
@@ -195,9 +200,14 @@ class Device(Protocol):
         elsewhere."""
         ...
 
-    async def type_text(self, text: str, *, replace: bool = False) -> None:
+    async def type_text(
+        self, text: str, *, replace: bool = False, method: TypeMethod = "set"
+    ) -> str | None:
         """Types ``text`` into the focused field at the cursor; with ``replace``, clears
-        the field first so that ``text`` is all it holds."""
+        the field first so that ``text`` is all it holds. ``method`` is how: "set"
+        into the field, "keys" tapped on the keyboard, "paste" through the field's menu.
+        Returns why it stopped short ("no_candidate", "no_paste_menu" ...), or None: the
+        field is read back either way."""
         ...
 
     async def read_text_field(self, typed: str = "") -> TextField:

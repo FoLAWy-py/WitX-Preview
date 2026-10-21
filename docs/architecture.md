@@ -15,7 +15,7 @@ WitX 面向个人自部署，一个部署供一位 Owner 使用。租户字段�
 | Gateway | `services/gateway` | 本机设备发现、Appium 会话、SQLite journal、输入前检查和执行 |
 | Contracts | `packages/contracts` | Python 协议与 Web API 合同，生成 TypeScript 类型 |
 
-API 和 Hub 同进程，Worker 独立运行。Gateway 主动连接云端，手机不开放外部端口。PostgreSQL 管理权威状态；私有对象存储保存截图与恢复账本。
+API 和 Hub 同进程，Worker 独立运行。Gateway 主动连接云端，手机不开放外部端口。PostgreSQL 管理权威状态；私有对象存储保存截图与恢复账本。Worker 启动时、此后每天会独立清扫没有观察记录认领的截图，失败后每小时重试；最后一次清扫结果按租户保存在数据库中，供 `/metrics` 和告警读取。
 
 ## 分层
 
@@ -31,7 +31,7 @@ cli → api → hub / worker → harness → services → store / models / objec
 2. 独立模型调用判定风险；纯函数规则结合模式、效果、App 和输入内容决定是否审批。风险调用失败按敏感处理。
 3. 准入检查设备就绪、最新截图、租约 epoch、前序动作和 UNKNOWN 状态。
 4. 敏感输入绑定参数摘要审批；派发时再次检查任务控制版本、租约和批准有效性。
-5. Gateway 按 action_id 去重，核对当前设备与屏幕几何 / 前台 App，先写入 journal intent，再执行并记录结果。
+5. Gateway 按 action_id 去重，核对当前设备与屏幕几何 / 前台 App，先写入 journal intent，再执行并记录结果。iOS 文字输入可按驱动写入、逐键输入或输入框菜单粘贴三种方式执行，仍共用准入、策略和单次执行记录。
 6. 执行后上传新截图。失败可能产生 UNKNOWN，只有人凭更新证据裁定后才能继续。
 
 同一 action_id 最多执行一次；重新提出一个动作是另一个 ID，仍需遵守准入和策略。完成需要晚于最后输入的新截图及已结束的动作，但不构成对业务结果的绝对保证。
@@ -44,7 +44,7 @@ cli → api → hub / worker → harness → services → store / models / objec
 
 ## Skill 与 Plugin
 
-Plugin 只含文本和元数据，不执行代码、不授予权限。安装锁定 commit 与文件摘要；不兼容当前工具或效果的 Skill 不加载。本人写的 Skill 通过本机 marketplace 保存，Agent 可以起草，由用户检查和保存。
+Plugin 只含文本和元数据，不执行代码、不授予权限。安装锁定 commit 与文件摘要；不兼容当前工具或效果的 Skill 不加载。本人写的 Skill 通过本机 marketplace 保存，Agent 可以一次起草多个，由用户检查和保存。同名草稿只允许最新版本保存；长上下文压缩会保留已加载 Skill 的名字和版本，提示 Agent 在继续依照它操作前重新加载。
 
 内置 marketplace 名称是 `witx-preview`，来源为 `https://github.com/FoLAWy-py/witx-plugins-preview.git`；未指定来源的 `witx plugin install basics` 使用它。安装和更新仍要求用户检查并确认。
 

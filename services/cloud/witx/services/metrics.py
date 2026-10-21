@@ -26,6 +26,9 @@ HELP = {
     "witx_runs": "Unfinished runs by status and wait reason.",
     "witx_run_queue_seconds": "Age of the oldest run waiting for a worker.",
     "witx_devices": "Devices by platform and connection.",
+    "witx_screenshot_sweep_objects": "Screenshot objects in the last sweep, by result.",
+    "witx_screenshot_sweep_age_seconds": "Since the last screenshot sweep, by outcome.",
+    "witx_screenshot_sweep_seconds": "How long the last screenshot sweep took, by outcome.",
 }
 
 

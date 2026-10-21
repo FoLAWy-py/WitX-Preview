@@ -16,9 +16,9 @@ from witx.config import Limits, parse_models
 from witx.domain.model import PermissionMode, Task
 from witx.harness.loop import Harness
 from witx.harness.plugins import Installed
-from witx.hub import Hub, Session, screenshot_key
+from witx.hub import Hub, Session
 from witx.models import ModelRequest
-from witx.objects import LocalObjectStore
+from witx.objects import LocalObjectStore, screenshot_key
 from witx.services import lifecycle
 from witx.store import execution, runs, tasks
 from witx.store.db import Database, fetch
@@ -53,6 +53,8 @@ class SimulatedGateway:
     field_name: str | None = None  # ... and what the app calls it
     wrong_field: bool = False  # the focused field is not where the agent pointed
     select_problem: str | None = None  # select_option tapped nothing: "not_found", "ambiguous"
+    type_problem: str | None = None  # type_text stopped short: "no_candidate" ...
+    field_read: bool = True  # False: the field could not be read back after type_text
     capture_error: str | None = None  # screenshots fail with this, if set
     sliders: list[dict[str, Any]] = field(default_factory=list)  # sliders in view
 
@@ -201,6 +203,9 @@ class Rig:
         reason = "epoch" if outcome == "rejected" else None
         if action.input.kind == "select_option" and outcome == "returned":
             reason = self.gateway.select_problem
+        if action.input.kind == "type_text" and outcome == "returned":
+            reason = self.gateway.type_problem
+        read = action.input.kind != "type_text" or self.gateway.field_read
         if self.gateway.wrong_field and action.input.kind == "type_text" and outcome == "returned":
             outcome, reason = "rejected", "wrong_field"
         await self.handle(
@@ -213,9 +218,14 @@ class Rig:
                 field_text=self.gateway.field_text
                 if action.input.kind in ("type_text", "select_option")
                 and not (action.input.kind == "select_option" and self.gateway.select_problem)
+                and read
                 else None,
-                field_name=self.gateway.field_name if action.input.kind == "type_text" else None,
-                field_box=[144, 2125, 992, 192] if action.input.kind == "type_text" else None,
+                field_name=self.gateway.field_name
+                if action.input.kind == "type_text" and read
+                else None,
+                field_box=[144, 2125, 992, 192]
+                if action.input.kind == "type_text" and read
+                else None,
             )
         )
         if outcome != "rejected":

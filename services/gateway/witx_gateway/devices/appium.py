@@ -145,9 +145,6 @@ class AppiumDevice:
         # Its screen was found locked or dark the last time it was looked at: reported as
         # the problem "locked" until a look finds it on again.
         self.locked = False
-        # The next session starts a new agent on the phone instead of using the one that
-        # runs there (see ``_renew_agent``).
-        self._fresh_agent = False
         self._ports = ports or {}  # from ports.assign: never shared with another device
         self._extra_capabilities = capabilities or {}  # e.g. WebDriverAgent signing
         self._identity: str | None = None  # the device at the other end, pinned when first seen
@@ -166,8 +163,8 @@ class AppiumDevice:
         capabilities: dict[str, Any],
         keep_warm: bool,
     ) -> None:
-        """Applies the device's settings from the Gateway's configuration while it runs: what the
-            next report says and the next session is opened with. A session
+        """Applies the device's settings from the Gateway's configuration while it runs:
+        what the next report says and the next session is opened with. A session
         that is open stays as it is, so a device in the middle of a task is not touched."""
         self.name = name
         self.sensitive_apps = list(sensitive_apps)
@@ -375,13 +372,6 @@ class AppiumDevice:
         self.locked = True
         raise DeviceError("locked")
 
-    async def _renew_agent(self) -> None:
-        """Ends the session, and has the next one start a new agent on the phone: the one
-        there runs on but can do nothing. The next call opens it, which takes longer
-        than usual (the agent is installed and started again)."""
-        self._fresh_agent = True
-        await self._end_session()
-
     async def wake(self) -> None:
         """Wakes the screen for a person taking the phone over: both drivers' unlock, which
         lights the screen and, on a phone with no passcode, opens it (iOS presses Home,
@@ -414,7 +404,6 @@ class AppiumDevice:
             {"capabilities": {"alwaysMatch": caps}},
             timeout=SESSION_TIMEOUT,
         )
-        self._fresh_agent = False
         return str(value["sessionId"])
 
     async def _session_call(

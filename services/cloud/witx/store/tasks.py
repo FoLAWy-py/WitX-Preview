@@ -529,7 +529,8 @@ async def set_title(conn: AsyncConnection, task_id: UUID, title: str | None) -> 
     else:
         await execute(
             conn,
-            "UPDATE tasks SET title = :t WHERE id = :id AND title IS NULL",
+            # Titled outside any transaction: the task may have been deleted meanwhile.
+            "UPDATE tasks SET title = :t WHERE id = :id AND title IS NULL AND deleted_at IS NULL",
             t=title,
             id=task_id,
         )

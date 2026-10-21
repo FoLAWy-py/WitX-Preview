@@ -14,13 +14,15 @@ from witx.config import Settings
 from witx.domain import rules
 from witx.domain.model import Effect, TaskStatus
 from witx.domain.rules import Rejected
+from witx.objects import screenshot_key
 from witx.services import execution as exec_service
 from witx.services import lifecycle, retention
 from witx.services.identity import Actor
 from witx.store import tasks
 from witx.store.db import Database, fetch, fetch_one
+from witx_contracts import gateway as wire
 
-from tests.cloud.rig import Rig
+from tests.cloud.rig import SCREEN, Rig
 from tests.cloud.support import call, device_info, provision
 from tests.cloud.test_flow import complete, tap
 from tests.conftest import Databases
@@ -128,6 +130,134 @@ async def test_a_deleted_task_disappears_and_its_content_and_screenshots_are_pur
     assert audit["usage"]["model_calls"] > 0 and isinstance(audit["usage"]["input_tokens"], int)
     # Deleting again is not an error.
     assert (await web.delete(f"/api/v1/tasks/{task_id}")).status_code == 204
+
+
+async def test_a_purged_task_leaves_no_title_pin_or_stored_response_behind(  # type: ignore[no-untyped-def]
+    rig: Rig, web, admin_db: Database
+) -> None:
+    device = str(rig.tenant.device_ids[0])
+    rig.model.script = [[call("ask_user", question="Which network?")]]
+    created = await web.post(
+        "/api/v1/tasks",
+        json={"goal": "Open Wi-Fi settings", "device_ids": [device]},
+        headers={"Idempotency-Key": "k-create"},
+    )
+    task_id = created.json()["id"]
+    await rig.settle()
+    stopped = await web.post(f"/api/v1/tasks/{task_id}/stop", headers={"Idempotency-Key": "k-stop"})
+    await rig.settle()
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        await tasks.set_title(conn, UUID(task_id), "Wi-Fi settings")
+    assert (await web.put(f"/api/v1/tasks/{task_id}/pin")).status_code == 204
+    assert (await web.delete(f"/api/v1/tasks/{task_id}")).status_code == 204
+
+    await purge(rig)
+    async with admin_db.system() as conn:
+        tombstone = await fetch_one(
+            conn, "SELECT title, request FROM tasks WHERE id = :t", t=task_id
+        )
+        pins = await fetch(conn, "SELECT 1 FROM task_pins WHERE task_id = :t", t=task_id)
+        responses = await fetch(conn, "SELECT response::text AS r FROM idempotency_keys")
+    assert tombstone is not None and (tombstone["title"], tombstone["request"]) == (None, "")
+    assert pins == []
+    assert len(responses) == 2 and not any("Wi-Fi" in r["r"] for r in responses)
+    # A late retry neither replays the task nor creates it again.
+    again = await web.post(
+        "/api/v1/tasks",
+        json={"goal": "Open Wi-Fi settings", "device_ids": [device]},
+        headers={"Idempotency-Key": "k-create"},
+    )
+    assert again.status_code == 404
+    retried_stop = await web.post(
+        f"/api/v1/tasks/{task_id}/stop", headers={"Idempotency-Key": "k-stop"}
+    )
+    assert (stopped.status_code, retried_stop.status_code) == (200, 404)
+    assert (await web.get("/api/v1/tasks")).json() == []
+
+
+def refuse_first_upload(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> list[UUID]:
+    """The first screenshot uploaded is not what the Gateway reports, so it is refused;
+    returns the observation it was for, once there is one."""
+    capture = rig.capture
+    refused: list[UUID] = []
+
+    async def corrupted(observation_id: UUID, screen: dict[str, Any] | None = None) -> None:
+        if refused:
+            return await capture(observation_id, screen)
+        refused.append(observation_id)
+        await rig.objects.put(screenshot_key(rig.tenant.id, observation_id), b"png", "image/png")
+        await rig.handle(
+            wire.ObservationResult(
+                observation_id=observation_id,
+                captured_at=datetime.now(UTC),
+                screen=wire.ScreenState(**SCREEN),
+                sha256="0" * 64,
+            )
+        )
+
+    monkeypatch.setattr(rig, "capture", corrupted)
+    return refused
+
+
+async def completed_after_a_refused_upload(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> tuple[UUID, UUID]:
+    """A completed task whose first screenshot was refused; returns the task and that
+    observation."""
+    device = rig.tenant.device_ids[0]
+    refused = refuse_first_upload(rig, monkeypatch)
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        [call("observe", device_id=device)],
+        lambda r: tap(r, device),
+        complete,
+    ]
+    task = await rig.create_task(device_ids=[device])
+    await rig.settle()
+    assert (await rig.task(task.id)).status == TaskStatus.COMPLETED
+    monkeypatch.undo()
+    return task.id, refused[0]
+
+
+async def test_a_screenshot_that_failed_its_check_is_deleted_with_its_task(  # type: ignore[no-untyped-def]
+    rig: Rig, web, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_id, refused = await completed_after_a_refused_upload(rig, monkeypatch)
+    orphan = tmp_path / screenshot_key(rig.tenant.id, refused)
+    assert orphan.exists()
+    assert (await web.delete(f"/api/v1/tasks/{task_id}")).status_code == 204
+    await purge(rig)
+    assert not orphan.exists()
+
+
+async def test_the_sweep_deletes_screenshots_no_observation_holds(
+    rig: Rig, admin_db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_id, observation = await completed_after_a_refused_upload(rig, monkeypatch)
+    refused = tmp_path / screenshot_key(rig.tenant.id, observation)
+    shots = await screenshots(admin_db, task_id)
+    accepted = [tmp_path / s["object_key"] for s in shots if s["object_key"]]
+    # A task purged before every object was deleted by id, or lost to a restored backup.
+    rowless = screenshot_key(rig.tenant.id, uuid4())
+    await rig.objects.put(rowless, b"png", "image/png")
+
+    async def uploaded_not_reported(observation_id: UUID, screen: object = None) -> None:
+        """An upload under way: the Gateway has not reported it yet."""
+        await rig.objects.put(screenshot_key(rig.tenant.id, observation_id), b"png", "image/png")
+
+    monkeypatch.setattr(rig, "capture", uploaded_not_reported)
+    rig.model.script = [[call("observe", device_id=rig.tenant.device_ids[1])]]
+    await rig.create_task(device_ids=[rig.tenant.device_ids[1]])
+    await rig.settle()
+    async with admin_db.system() as conn:
+        (open_,) = await fetch(conn, "SELECT id FROM observations WHERE status = 'sent'")
+    uploading = tmp_path / screenshot_key(rig.tenant.id, open_["id"])
+    assert refused.exists() and uploading.exists()
+
+    assert (await retention.sweep_screenshots(rig.db, rig.objects)).deleted == 2
+    assert not refused.exists() and not (tmp_path / rowless).exists()
+    assert uploading.exists() and accepted and all(path.exists() for path in accepted)
+    assert (await retention.sweep_screenshots(rig.db, rig.objects)).deleted == 0
 
 
 async def test_only_a_finished_task_can_be_deleted(rig: Rig) -> None:

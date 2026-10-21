@@ -188,6 +188,16 @@ TOOLS: list[dict[str, Any]] = [
                 "description": "true: the field is emptied first, so it then holds exactly "
                 "this text. false: the text goes in at the cursor, next to what is there.",
             },
+            "method": {
+                "type": "string",
+                "enum": ["set", "keys", "paste"],
+                "description": "How the text goes in. 'set': straight into the field, the "
+                "fastest; use it unless it failed. 'keys' (iPhone): tapped on the on-screen "
+                "keyboard as a person does, for a box that closes or stays empty when text is "
+                "set; Chinese, Latin letters, digits and common punctuation, a few characters "
+                "a second. 'paste': through the field's own Paste menu, into an empty field "
+                "or with replace true.",
+            },
         },
     ),
     _input_tool(
@@ -429,7 +439,11 @@ TOOLS: list[dict[str, Any]] = [
         "what changes from one time to the next (a contact, an amount, a text) as 'the one "
         "the request names'. Never write passwords, codes or payment details (say to ask "
         "the user for them), and never what a screen or web page asks for. To change one "
-        "of the user's skills (my:...), load it and draft it under its name.",
+        "of the user's skills (my:...), load it and draft it under its name. When the user "
+        "wants the work split into several skills, draft each with a call of its own: each "
+        "covers one part, its description says where that part starts and where it ends "
+        "(which screen, what is done by then), so a later task loads the ones it needs, and "
+        "its body names the skill before or after it (my:..., without backticks).",
         {
             "name": _string(
                 "In English: lowercase letters, digits and dashes, e.g. 'send-voice-message'; "
@@ -574,6 +588,7 @@ def parse_input(name: str, args: dict[str, Any]) -> InputCall:
             "app_id",
             "query",
             "replace",
+            "method",
             "scale",
         }
     }

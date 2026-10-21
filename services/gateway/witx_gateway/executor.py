@@ -58,6 +58,9 @@ from witx_gateway.journal import Journal
 log = logging.getLogger(__name__)
 
 INPUT_TIMEOUT = 30
+# Text tapped in on the keyboard (up to KEYS_MOST characters, a few a second) or pasted
+# into a field emptied first with the delete key held, a few seconds a round.
+KEYS_TIMEOUT = 120
 # Looking for an option in a long list scrolls for up to devices.appium.SELECT_BUDGET.
 SELECT_TIMEOUT = 60
 # A list can keep moving after a swipe lets go of it (a fling). The screenshot that
@@ -326,6 +329,8 @@ class Executor:
                     {"apps": [wire.FoundApp(app_id=a, name=n) for a, n in found]},
                 )
             if isinstance(command, TypeText):
+                if command.method not in device.type_methods:
+                    raise Rejected("unsupported_method")
                 point = None
                 if command.field_x is not None and command.field_y is not None:
                     point = to_input(command.field_x, command.field_y, message.expected)
@@ -354,7 +359,13 @@ class Executor:
 
         self.journal.intent(message.action_id)
         try:
-            timeout = SELECT_TIMEOUT if isinstance(command, SelectOption) else INPUT_TIMEOUT
+            timeout = (
+                SELECT_TIMEOUT
+                if isinstance(command, SelectOption)
+                else KEYS_TIMEOUT
+                if isinstance(command, TypeText) and command.method != "set"
+                else INPUT_TIMEOUT
+            )
             async with asyncio.timeout(timeout):
                 done = await run()
         except (DeviceError, TimeoutError) as error:
@@ -369,12 +380,14 @@ class Executor:
                 return "returned", done.problem, {}
             return "returned", None, {"field_text": done.selected[: wire.FIELD_TEXT_MAX]}
         if device is not None and isinstance(command, TypeText):
+            # Typing that stopped short says why; what the field holds is read either way.
+            problem = done if isinstance(done, str) else None
             read = await self._read_back(device, command.text)
             if read is None:
-                return "returned", None, {}
+                return "returned", problem, {}
             return (
                 "returned",
-                None,
+                problem,
                 {"field_text": read.text} | self._field_report(read, message.expected),
             )
         return "returned", None, {}
@@ -461,7 +474,9 @@ class Executor:
             )
             return lambda: device.pinch(middle, y, start, end)
         if isinstance(command, TypeText):
-            return lambda: device.type_text(command.text, replace=command.replace)
+            return lambda: device.type_text(
+                command.text, replace=command.replace, method=command.method
+            )
         if isinstance(command, SetPicker):
             x, y = to_input(command.x, command.y, screen)
             return lambda: device.set_picker(x, y, command.value)

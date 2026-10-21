@@ -1209,17 +1209,23 @@ def unauthorized_iphone(
 ) -> tuple[IOSDevice, dict[str, Any]]:
     """A real iPhone whose agent lost its rights while it was locked: it sees nothing of
     the screen and its screenshots fail with XCTest's code 41. ``passcode``: whether the
-    phone itself says it still needs its passcode (None: it cannot be asked)."""
+    phone itself says it still needs its passcode (None: it cannot be asked). Its agent's
+    process, when stopped, is counted in ``world["stopped"]``."""
 
     async def asked(udid: str) -> bool | None:
         return passcode
 
+    async def stop(udid: str) -> bool:
+        world["stopped"] += 1
+        return True
+
     monkeypatch.setattr(ios_module, "passcode_required", asked)
-    world: dict[str, Any] = {"rotation": -1, "unauthorized": True}
+    monkeypatch.setattr(ios_module, "stop_agent", stop)
+    world: dict[str, Any] = {"rotation": -1, "unauthorized": True, "stopped": 0}
     return ios_device("UDID-1", world, requests), world
 
 
-async def test_an_agent_that_lost_its_rights_on_an_unlocked_iphone_is_renewed(
+async def test_an_agent_that_lost_its_rights_on_an_unlocked_iphone_is_stopped_not_uninstalled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: Requests = []
@@ -1228,14 +1234,11 @@ async def test_an_agent_that_lost_its_rights_on_an_unlocked_iphone_is_renewed(
         await device.state()
     assert not device.locked  # it is not locked: its agent is broken
     assert ("DELETE", "/session/S1") in [(m, p) for m, p, _ in requests]
+    assert world["stopped"] == 1  # its process, so that the next session starts it again
     world.update(rotation=0, unauthorized=False)  # the new agent sees the screen
     await device.state()
-    first, renewed = session_capabilities(requests)
-    assert "appium:useNewWDA" not in first
-    assert renewed["appium:useNewWDA"] is True  # quit and start a new one, not reuse it
-    await device._end_session()
-    await device.state()
-    assert "appium:useNewWDA" not in session_capabilities(requests)[-1]  # only once
+    # Uninstalling it would take the phone's trust in a free team's certificate with it.
+    assert all("appium:useNewWDA" not in caps for caps in session_capabilities(requests))
 
 
 @pytest.mark.parametrize("passcode", [True, None])
@@ -1243,23 +1246,46 @@ async def test_an_iphone_that_still_needs_its_passcode_stays_locked_and_keeps_it
     monkeypatch: pytest.MonkeyPatch, passcode: bool | None
 ) -> None:
     requests: Requests = []
-    device, _ = unauthorized_iphone(requests, monkeypatch, passcode=passcode)
+    device, world = unauthorized_iphone(requests, monkeypatch, passcode=passcode)
     with pytest.raises(DeviceError, match="locked"):
         await device.state()
     assert device.locked
     assert ("DELETE", "/session/S1") not in [(m, p) for m, p, _ in requests]
+    assert world["stopped"] == 0
 
 
 async def test_an_agent_is_renewed_at_most_once_in_a_while(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: Requests = []
-    device, _ = unauthorized_iphone(requests, monkeypatch, passcode=False)
+    device, world = unauthorized_iphone(requests, monkeypatch, passcode=False)
     with pytest.raises(DeviceError, match="session_lost"):
         await device.state()
     with pytest.raises(DeviceError, match="locked"):  # the new agent did not help
         await device.state()
     assert len(session_capabilities(requests)) == 2
+    assert world["stopped"] == 1
+
+
+async def test_stopping_the_agent_ends_only_its_process_and_uninstalls_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[tuple[str, ...]] = []
+    agent = "file:///private/var/containers/Bundle/Application/X/WebDriverAgentRunner-Runner.app/WebDriverAgentRunner-Runner"
+
+    async def devicectl(udid: str, *command: str) -> dict[str, Any] | None:
+        commands.append(command)
+        if command[:3] == ("device", "info", "processes"):
+            processes = [
+                {"executable": "file:///sbin/launchd", "processIdentifier": 1},
+                {"executable": agent, "processIdentifier": 812},
+            ]
+            return {"runningProcesses": processes}
+        return {}
+
+    monkeypatch.setattr(ios_module, "_devicectl", devicectl)
+    assert await ios_module.stop_agent("UDID-1")
+    assert commands[1:] == [("device", "process", "terminate", "--pid", "812", "--kill")]
 
 
 async def test_a_dark_simulator_is_locked_without_asking_anything_more(

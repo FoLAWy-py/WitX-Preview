@@ -28,6 +28,11 @@ def test_a_cycle_repeated_back_to_back_is_counted_even_when_taps_wander_along_a_
     assert rules.repeats([i for c in cycle for i in c]) == 5
 
 
+def test_typing_the_same_text_another_way_is_not_going_in_circles() -> None:
+    cycle = [t(300, 900), typed("好看"), t(300, 900), typed("好看") | {"method": "keys"}]
+    assert rules.repeats(cycle) == 1
+
+
 def test_one_input_repeated_on_its_own_is_not_going_in_circles() -> None:
     assert rules.repeats([t(600, 400)] * 8) == 1  # e.g. tapping "+" eight times
 

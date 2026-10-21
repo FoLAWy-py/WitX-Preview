@@ -151,4 +151,21 @@ async def tenant_samples(conn: AsyncConnection, now: datetime) -> list[Sample]:
             GROUP BY 1, 2""",
         ["platform", "online"],
     )
+    sweep = await fetch_one(
+        conn,
+        """SELECT scanned, deleted, skipped_held, skipped_unrecognized, failed, error,
+                  extract(epoch FROM :now - finished_at) AS age, duration_ms
+             FROM screenshot_sweeps""",
+        now=now,
+    )
+    if sweep is not None:
+        for result in ("scanned", "deleted", "skipped_held", "skipped_unrecognized", "failed"):
+            samples.append(
+                Sample("witx_screenshot_sweep_objects", float(sweep[result]), {"result": result})
+            )
+        outcome = {"outcome": "error" if sweep["error"] else "ok"}
+        samples.append(Sample("witx_screenshot_sweep_age_seconds", float(sweep["age"]), outcome))
+        samples.append(
+            Sample("witx_screenshot_sweep_seconds", sweep["duration_ms"] / 1000, outcome)
+        )
     return samples

@@ -141,6 +141,33 @@ async def maintain_forever(
             await asyncio.wait_for(stop.wait(), every_seconds)
 
 
+async def sweep_forever(
+    db: Database,
+    objects: ObjectStore,
+    stop: asyncio.Event,
+    *,
+    every: timedelta = timedelta(days=1),
+    retry: timedelta = timedelta(hours=1),
+) -> None:
+    """Sweeps screenshot objects no observation holds when the worker starts, then once
+    a day; an hour after a sweep that could not finish. One worker at a time, since it
+    lists every screenshot. Its own loop, so a long or failing sweep holds up nothing
+    else: nothing it raises leaves this function."""
+    while not stop.is_set():
+        wait = every
+        try:
+            async with db.only_one("screenshot-sweep") as mine:
+                if mine:
+                    swept = await retention.sweep_screenshots(db, objects)
+                    if swept.failed or swept.error:
+                        wait = retry
+        except Exception:
+            log.exception("screenshot sweep failed; retrying later")
+            wait = retry
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), wait.total_seconds())
+
+
 async def schedule_forever(db: Database, stop: asyncio.Event) -> None:
     """Starts scheduled tasks when their moment comes: it sleeps until the soonest
     schedule is due, and looks at least every SCHEDULE_POLL. Several workers may run

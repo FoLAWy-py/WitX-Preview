@@ -450,12 +450,15 @@ export function Skills({
  * A skill the agent drafted in the conversation. Nothing is saved until the person
  * has reviewed it, as on the settings page; to change it, they can edit it there or tell
  * the agent in the message box, and try it first in a task of its own, in plan mode.
+ * Once the agent drafts the same skill again, the older card shrinks to its name.
  */
 export function SkillDraftCard({
   draft,
+  superseded,
   task,
 }: {
   draft: SkillDraft;
+  superseded: boolean;
   task: TaskDetail;
 }) {
   const { t } = useI18n();
@@ -476,6 +479,20 @@ export function SkillDraftCard({
     current.body === draft.body &&
     current.apps.join(",") === draft.apps.join(",");
   const done = saved ?? (same ? current : undefined);
+
+  // Drafted again below: only its name stays, faint.
+  if (superseded && !done) {
+    return (
+      <section
+        aria-label={t("skillDraft.title", { name: draft.name })}
+        className="flex items-center gap-1.5 text-[12.5px] text-faint"
+      >
+        <Ico icon={Puzzle} size={14} />
+        <span className="truncate line-through">{draft.name}</span>
+        <span>· {t("skillDraft.superseded")}</span>
+      </section>
+    );
+  }
 
   return (
     <section

@@ -1,0 +1,39 @@
+# Alerting rules for the API's /metrics; load them with Prometheus `rule_files:`.
+groups:
+  - name: witx-screenshot-sweep
+    rules:
+      # A worker sweeps screenshot objects no observation holds when it starts and then
+      # once a day, and an hour after a sweep that did not finish.
+      - alert: WitxScreenshotSweepStale
+        expr: max by (tenant) (witx_screenshot_sweep_age_seconds) > 26 * 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No screenshot sweep for tenant {{ $labels.tenant }} in over 26 hours"
+          description: >-
+            The last sweep was {{ $value | humanizeDuration }} ago. Check that a worker is
+            running and look in its log for "screenshot sweep failed".
+      - alert: WitxScreenshotSweepFailing
+        # Each retry replaces the outcome, so this lasts only while retries keep failing:
+        # about three tries in a row.
+        expr: witx_screenshot_sweep_age_seconds{outcome="error"} >= 0
+        for: 3h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Screenshot sweeps for tenant {{ $labels.tenant }} keep failing"
+          description: >-
+            The worker could not list or check this tenant's screenshots. Its log has
+            "screenshot sweep stopped" with the error; the object store is the usual cause.
+      - alert: WitxScreenshotSweepMissing
+        # Also fires when /metrics is not scraped at all.
+        expr: absent(witx_screenshot_sweep_age_seconds)
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No screenshot sweep has been reported"
+          description: >-
+            /metrics has no witx_screenshot_sweep_age_seconds: no worker has finished a
+            sweep since the database was migrated, or the metrics are not being scraped.

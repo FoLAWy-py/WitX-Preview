@@ -143,7 +143,8 @@ async def _draft_skill(turn: Turn, call: ToolCall) -> None:
             "status": "drafted",
             "skill": skill.name,
             "note": "The user reads it and saves it themselves, or tells you what to change; "
-            + ("saved, it replaces their skill of this name." if saved else "you cannot save it."),
+            + ("saved, it replaces their skill of this name." if saved else "you cannot save it.")
+            + " Draft any other skill they asked for before you finish.",
         },
     )
 

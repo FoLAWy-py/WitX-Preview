@@ -1029,7 +1029,7 @@ async def typing_device(rig: Rig) -> UUID:
     return rig.tenant.device_ids[0]
 
 
-def type_into_field(request, device, replace=False):  # type: ignore[no-untyped-def]
+def type_into_field(request, device, replace=False, method="set"):  # type: ignore[no-untyped-def]
     return [
         call(
             "type_text",
@@ -1039,6 +1039,7 @@ def type_into_field(request, device, replace=False):  # type: ignore[no-untyped-
             field_x=300,
             field_y=400,
             replace=replace,
+            method=method,
             target="Phone number field",
             expected_effect="The number is in the field",
             effects=[],
@@ -1092,10 +1093,54 @@ async def test_text_that_replaces_the_field_reaches_the_gateway_as_one_input(rig
     assert sent.input.replace is True  # type: ignore[union-attr]
 
 
+async def test_how_the_text_goes_in_reaches_the_gateway_with_the_input(rig: Rig) -> None:
+    device = await typing_device(rig)
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        lambda r: type_into_field(r, device, method="keys"),
+        complete,
+    ]
+    await rig.create_task("Save 13700130810 as a contact")
+    await rig.settle()
+    (sent,) = rig.gateway.actions
+    assert sent.input.method == "keys"  # type: ignore[union-attr]
+
+
+async def test_a_field_not_read_back_after_text_was_set_is_retried_by_keys(rig: Rig) -> None:
+    device = await typing_device(rig)
+    rig.gateway.field_read = False  # the box closed when the text was set into it
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        lambda r: type_into_field(r, device),
+        complete,
+    ]
+    task = await rig.create_task("Comment on the post")
+    await rig.settle()
+    (typed,) = [o for o in await rig.outputs(task.id) if o["name"] == "type_text"]
+    assert "method 'keys'" in typed["note"]
+
+
+async def test_typing_by_keys_that_stopped_short_says_why_and_what_went_in(rig: Rig) -> None:
+    device = await typing_device(rig)
+    rig.gateway.type_problem = "no_candidate"
+    rig.gateway.field_text = "1370"
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        lambda r: type_into_field(r, device, method="keys"),
+        complete,
+    ]
+    task = await rig.create_task("Save 13700130810 as a contact")
+    await rig.settle()
+    (typed,) = [o for o in await rig.outputs(task.id) if o["name"] == "type_text"]
+    assert (typed["reason"], typed["field_shows"]) == ("no_candidate", "1370")
+    assert "no candidate" in typed["note"]
+
+
 def test_the_risk_check_is_told_the_text_replaces_what_the_field_holds() -> None:
     typed = {"kind": "type_text", "text": "Ann"}
     assert describe_input(typed | {"replace": True}).startswith("replace all text")
     assert describe_input(typed).startswith("type this text")
+    assert "by tapping the keyboard" in describe_input(typed | {"method": "keys"})
 
 
 async def test_the_sliders_in_view_are_listed_in_the_screenshot_result(rig: Rig) -> None:
