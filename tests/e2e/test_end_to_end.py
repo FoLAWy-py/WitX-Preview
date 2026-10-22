@@ -5,6 +5,7 @@ Only the model is scripted and the phone is the in-memory fake device.
 
 import asyncio
 import contextlib
+import json
 import socket
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -212,6 +213,40 @@ async def test_a_replay_holds_only_the_kinds_asked_for_and_every_later_event(sys
             assert sent.status_code == 200
             later = await frames(lines, head + 1)
         assert (head + 1, "input.added") in later
+
+
+async def test_a_workspace_page_hears_of_a_task_made_and_what_the_worker_does_with_it(  # type: ignore[no-untyped-def]
+    system,
+) -> None:
+    base, model, _, worker = system
+    model.script = [
+        [say("Hello."), call("complete_task", summary="done", evidence_observation_ids=[])]
+    ]
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    async with (
+        httpx.AsyncClient(base_url=base, headers=auth, timeout=10) as web,
+        web.stream("GET", "/api/v1/workspace/events") as stream,
+    ):
+        lines = stream.aiter_lines()
+        assert await anext(lines) == ": listening"  # from here on nothing is missed
+
+        created = await web.post("/api/v1/tasks", json={"goal": "Say hello", "device_ids": []})
+        task_id = created.json()["id"]
+        heard: list[tuple[str, str | None]] = []
+        while ("task", "task.created") not in heard:
+            line = await anext(lines)
+            if line.startswith("data: "):
+                event = json.loads(line[6:])
+                assert event["data"]["task_id"] == task_id
+                heard.append((event["type"], event["data"]["type"]))
+
+        for _ in range(20):  # the worker, in its own transactions
+            await worker.run_once()
+        while ("task", "agent.message") not in heard:
+            line = await anext(lines)
+            if line.startswith("data: "):
+                event = json.loads(line[6:])
+                heard.append((event["type"], event["data"]["type"]))
 
 
 async def test_requests_need_a_valid_token(system) -> None:  # type: ignore[no-untyped-def]

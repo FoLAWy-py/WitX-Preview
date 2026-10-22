@@ -129,6 +129,10 @@ export async function mockApi(
     }
     return route.fulfill({ status: 404, json: { code: "not_found" } });
   });
+  // The workspace's notices: none, unless a test serves them.
+  await page.route("**/api/v1/workspace/events", (route) =>
+    route.fulfill({ status: 503, json: {} }),
+  );
   // What changed after an event: here the whole task as the test serves it now, which
   // the page applies like changes. The task is fetched from the page, so the test's own
   // routes for it answer.

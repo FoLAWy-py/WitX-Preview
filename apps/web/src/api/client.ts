@@ -439,20 +439,44 @@ export class Api {
     types?: readonly string[],
   ): Promise<void> {
     const only = types ? `&types=${types.join(",")}` : "";
-    const response = await this.request(
+    await this.stream(
       `/api/v1/tasks/${taskId}/events?after=${after}${only}`,
-      {
-        signal,
-      },
+      handlers,
+      signal,
     );
+  }
+
+  /** Reads the workspace's notices of changes until the stream ends or `signal`
+   * aborts. It counts as open once the server says it listens: what is loaded after
+   * that misses no change. */
+  async workspaceEvents(
+    _after: number,
+    handlers: StreamHandlers,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await this.stream("/api/v1/workspace/events", handlers, signal, true);
+  }
+
+  private async stream(
+    path: string,
+    handlers: StreamHandlers,
+    signal: AbortSignal,
+    openOnFirstWord = false,
+  ): Promise<void> {
+    const response = await this.request(path, { signal });
     const reader = response.body?.getReader();
     if (!reader) return;
-    handlers.onOpen();
+    if (!openOnFirstWord) handlers.onOpen();
+    let opened = !openOnFirstWord;
     const decoder = new TextDecoder();
     let buffer = "";
     for (;;) {
       const { value, done } = await reader.read();
       if (done) return;
+      if (!opened) {
+        opened = true;
+        handlers.onOpen();
+      }
       handlers.onActivity(); // events and keep-alives alike
       buffer += decoder.decode(value, { stream: true });
       const { messages, rest } = parseSse(buffer);

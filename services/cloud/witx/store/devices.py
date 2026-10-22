@@ -8,6 +8,7 @@ from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from witx.domain.model import Device, Lease
+from witx.store import notices
 from witx.store.db import execute, fetch, fetch_one
 
 _DEVICE = """id, tenant_id, gateway_id, native_id, platform, name, capabilities, online, epoch,
@@ -75,6 +76,7 @@ async def insert_gateway(
         c=enroll_code_hash,
         e=enroll_expires_at,
     )
+    await notices.notify(conn, "devices")
     return gateway_id
 
 
@@ -94,6 +96,7 @@ async def enroll_gateway(
         host=host,
         now=now,
     )
+    await notices.notify(conn, "devices")
     return row["id"] if row else None
 
 
@@ -115,6 +118,7 @@ async def set_gateway_disabled(conn: AsyncConnection, gateway_id: UUID, disabled
         f"UPDATE gateways SET disabled_at = {value} WHERE id = :g AND revoked_at IS NULL",
         g=gateway_id,
     )
+    await notices.notify(conn, "devices")
     return count == 1
 
 
@@ -128,6 +132,7 @@ async def revoke_gateway(conn: AsyncConnection, gateway_id: UUID) -> bool:
             WHERE id = :g AND revoked_at IS NULL""",
         g=gateway_id,
     )
+    await notices.notify(conn, "devices")
     return count == 1
 
 
@@ -217,6 +222,7 @@ async def sync_gateway_devices(
         )
         assert row is not None
         result.append(_device(row))
+    await notices.notify(conn, "devices")
     return result
 
 
@@ -226,6 +232,7 @@ async def set_gateway_offline(conn: AsyncConnection, gateway_id: UUID) -> list[U
         "UPDATE devices SET online = false WHERE gateway_id = :g RETURNING id",
         g=gateway_id,
     )
+    await notices.notify(conn, "devices")
     return [r["id"] for r in rows]
 
 
@@ -315,6 +322,7 @@ async def grant_lease(
         epoch=epoch,
     )
     assert row is not None
+    await notices.notify(conn, "devices")
     return _lease(row)
 
 
@@ -356,6 +364,7 @@ async def hold_for_person(
         e=expires_at,
     )
     assert row is not None
+    await notices.notify(conn, "devices")
     return _lease(row)
 
 
@@ -368,6 +377,7 @@ async def request_stop(conn: AsyncConnection, device_id: UUID) -> UUID:
         d=device_id,
         s=stop_id,
     )
+    await notices.notify(conn, "devices")
     return stop_id
 
 
@@ -390,6 +400,7 @@ async def set_takeover(
         u=user_id,
         e=expires_at,
     )
+    await notices.notify(conn, "devices")
 
 
 async def extend_takeover(conn: AsyncConnection, takeover_id: UUID, expires_at: datetime) -> None:
@@ -420,10 +431,12 @@ async def clear_stop(conn: AsyncConnection, device_id: UUID) -> None:
         "UPDATE device_leases SET stop_id = NULL, stop_requested_at = NULL WHERE device_id = :d",
         d=device_id,
     )
+    await notices.notify(conn, "devices")
 
 
 async def release_lease(conn: AsyncConnection, device_id: UUID) -> None:
     await execute(conn, "DELETE FROM device_leases WHERE device_id = :d", d=device_id)
+    await notices.notify(conn, "devices")
 
 
 async def pool_names(conn: AsyncConnection) -> dict[UUID, str]:
@@ -449,6 +462,7 @@ async def set_enabled(
         u=user_id,
     )
     await record_change(conn, device_id, user_id, "enabled" if enabled else "disabled", name)
+    await notices.notify(conn, "devices")
 
 
 async def record_change(

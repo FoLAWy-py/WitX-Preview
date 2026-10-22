@@ -8,7 +8,8 @@ from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from witx.domain.model import PermissionMode, Repeat, Schedule
-from witx.store.db import execute, fetch, fetch_one
+from witx.store import notices
+from witx.store.db import fetch, fetch_one
 
 _COLUMNS = """id, tenant_id, created_by, goal, constraints, device_ids, permission_mode, model,
               repeat, time_of_day, timezone, weekdays, month_day, run_on, enabled,
@@ -73,6 +74,7 @@ async def insert(conn: AsyncConnection, schedule: Schedule) -> Schedule:
         last_outcome=schedule.last_outcome,
     )
     assert row is not None
+    await notices.notify(conn, "schedules", tenant_id=row["tenant_id"])
     return _schedule(row)
 
 
@@ -129,7 +131,14 @@ async def update(conn: AsyncConnection, schedule_id: UUID, **fields: Any) -> Non
     }
     assert set(fields) <= allowed, set(fields) - allowed
     sets = ", ".join(f"{k} = :{k}" for k in fields)
-    await execute(conn, f"UPDATE schedules SET {sets} WHERE id = :id", id=schedule_id, **fields)
+    row = await fetch_one(
+        conn,
+        f"UPDATE schedules SET {sets} WHERE id = :id RETURNING tenant_id",
+        id=schedule_id,
+        **fields,
+    )
+    if row is not None:
+        await notices.notify(conn, "schedules", tenant_id=row["tenant_id"])
 
 
 async def redefine(conn: AsyncConnection, schedule: Schedule) -> Schedule:
@@ -160,8 +169,13 @@ async def redefine(conn: AsyncConnection, schedule: Schedule) -> Schedule:
         next_run_at=schedule.next_run_at,
     )
     assert row is not None
+    await notices.notify(conn, "schedules", tenant_id=row["tenant_id"])
     return _schedule(row)
 
 
 async def delete(conn: AsyncConnection, schedule_id: UUID) -> None:
-    await execute(conn, "DELETE FROM schedules WHERE id = :id", id=schedule_id)
+    row = await fetch_one(
+        conn, "DELETE FROM schedules WHERE id = :id RETURNING tenant_id", id=schedule_id
+    )
+    if row is not None:
+        await notices.notify(conn, "schedules", tenant_id=row["tenant_id"])

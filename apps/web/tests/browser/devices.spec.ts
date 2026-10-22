@@ -369,7 +369,7 @@ test("the device list refreshes in place: the page stays where the reader scroll
   await main.evaluate((el) => (el.scrollTop = el.scrollHeight));
   const scrolled = await main.evaluate((el) => el.scrollTop);
   const before = listed;
-  await page.clock.runFor(21_000);
+  await page.clock.runFor(61_000); // the fallback reload; changes are pushed
   await expect.poll(() => listed).toBeGreaterThan(before);
   expect(await main.evaluate((el) => el.scrollTop)).toBe(scrolled);
 });

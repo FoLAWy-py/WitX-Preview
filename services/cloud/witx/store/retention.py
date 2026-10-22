@@ -1,4 +1,4 @@
-"""Deletion and retention : tombstones, the purge of a deleted task's content,
+"""Deletion and retention: tombstones, the purge of a deleted task's content,
 and the expiry of screenshots, tombstones and idempotency entries. Everything here runs
 under one tenant's row-level security."""
 
@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from witx.store import runs
+from witx.store import notices, runs
 from witx.store.db import execute, fetch, fetch_one, jsonb
 
 
@@ -55,15 +55,17 @@ async def mark_deleted(
     audit: dict[str, Any],
     now: datetime,
 ) -> None:
-    await execute(
+    row = await fetch_one(
         conn,
         """UPDATE tasks SET deleted_at = :now, deleted_by = :u, audit = CAST(:audit AS jsonb)
-            WHERE id = :t AND deleted_at IS NULL""",
+            WHERE id = :t AND deleted_at IS NULL RETURNING tenant_id""",
         t=task_id,
         u=user_id,
         audit=jsonb(audit),
         now=now,
     )
+    if row is not None:
+        await notices.notify(conn, "task", task_id=task_id, tenant_id=row["tenant_id"])
 
 
 async def tasks_to_purge(conn: AsyncConnection, limit: int) -> list[UUID]:

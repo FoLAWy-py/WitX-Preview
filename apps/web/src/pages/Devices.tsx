@@ -27,7 +27,7 @@ import { useAuth } from "@/lib/auth";
 import { cn, exactDate, relativeTime } from "@/lib/format";
 import { useAsync } from "@/lib/useAsync";
 import { byPool, takeoverable } from "@/lib/pool";
-import { useVisibleInterval, useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/workspace";
 import { PageBar } from "@/components/Shell";
 import { Takeover } from "@/components/Takeover";
 import {
@@ -364,7 +364,12 @@ function PoolsSection() {
   const { devices } = useWorkspace();
   const pools = useAsync(() => api.gateways(), [api]);
   // Kept current in place, like the devices below: connected, phones, last seen.
-  useVisibleInterval(() => void pools.reload(), 10_000);
+  // Pools change with their devices: a Gateway connecting or going offline.
+  const { devicesTick } = useWorkspace();
+  const reloadPools = pools.reload;
+  useEffect(() => {
+    if (devicesTick) void reloadPools();
+  }, [devicesTick, reloadPools]);
   const [adding, setAdding] = useState(false);
   const [guiding, setGuiding] = useState(false);
   const [name, setName] = useState("");

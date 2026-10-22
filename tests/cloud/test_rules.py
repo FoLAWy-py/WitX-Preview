@@ -593,14 +593,14 @@ def _at(minute: int) -> datetime:
     return datetime(2026, 10, 22, 8, 0, tzinfo=UTC) + timedelta(minutes=minute)
 
 
-def test_a_task_s_latest_part_goes_back_whole_rounds_until_it_holds_enough_actions() -> None:
+def test_a_task_s_latest_part_goes_back_whole_rounds_while_they_fit() -> None:
     rounds = [_at(0), _at(10), _at(20), _at(30)]
-    # 150 actions in the round at 20, 100 in the round at 30: two rounds hold 250.
+    # 100 actions in the round at 30; with the 150 of the round at 20 it would be 250.
     actions = [_at(20)] * 150 + [_at(30)] * 100
 
-    assert rules.part_start(rounds, actions) == _at(20)
-    # The part before it: the two earlier rounds hold nothing, so it reaches the start.
-    assert rules.part_start(rounds, actions, before=_at(20)) is None
+    assert rules.part_start(rounds, actions) == _at(30)
+    # The part before it: the three earlier rounds hold 150, so it reaches the start.
+    assert rules.part_start(rounds, actions, before=_at(30)) is None
 
 
 def test_a_part_holds_at_least_one_round_however_many_actions_it_has() -> None:

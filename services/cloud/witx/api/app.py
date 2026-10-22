@@ -29,6 +29,7 @@ from witx.api.routes import (
     system,
     takeover,
     tasks,
+    workspace,
 )
 from witx.config import Settings, plugins_dir
 from witx.domain.rules import Rejected
@@ -58,6 +59,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         async with mcp_server.session_manager.run():
             yield
+        await d.workspace.close()
 
     app = FastAPI(
         title="WitX",
@@ -125,6 +127,7 @@ def create_app(
     app.include_router(memories.routes(d))
     app.include_router(skills.routes(d, plugins or Installed(plugins_dir())))
     app.include_router(gateway.routes(d))
+    app.include_router(workspace.routes(d))
     app.mount("/", mcp_app)  # last: only paths no route above matched reach it
     app.add_middleware(RequestLog)  # outermost: sees the final status
     return app

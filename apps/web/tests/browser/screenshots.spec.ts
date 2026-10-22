@@ -57,7 +57,15 @@ test("a conversation's screenshots load as they come near view, not all at once"
   expect(asked.has("o1")).toBe(false);
   expect(asked.size).toBeLessThan(ROUNDS);
 
-  await page.getByText("Round 1 is done.").scrollIntoViewIfNeeded();
-
-  await expect.poll(() => asked.has("o1")).toBe(true);
+  // Scrolled to until it is asked for: the text is drawn again once its formatter
+  // has loaded, which on a slow machine can be in the middle of a scroll.
+  await expect
+    .poll(async () => {
+      await page
+        .getByText("Round 1 is done.")
+        .scrollIntoViewIfNeeded({ timeout: 1000 })
+        .catch(() => {});
+      return asked.has("o1");
+    })
+    .toBe(true);
 });

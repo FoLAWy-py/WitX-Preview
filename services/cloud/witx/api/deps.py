@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from witx_contracts import logs
 
 from witx.api.auth import Authenticator, OidcLogin
+from witx.api.workspace import Workspace
 from witx.config import Settings
 from witx.domain import rules
 from witx.domain.rules import Rejected
@@ -27,7 +28,7 @@ from witx.store.db import Database
 
 Response_ = TypeVar("Response_", bound=BaseModel)
 
-# Browser session cookies . The session token is HttpOnly; the CSRF token
+# Browser session cookies. The session token is HttpOnly; the CSRF token
 # is readable by the page, which echoes it in X-CSRF-Token on every write.
 SESSION_COOKIE = "witx_session"
 CSRF_COOKIE = "witx_csrf"
@@ -56,11 +57,13 @@ class Deps:
     hub: Hub
     login: OidcLogin | None = None
     secure_cookies: bool = field(init=False)
+    workspace: Workspace = field(init=False)
     allowed_origins: set[str] = field(init=False)
     default_provider: str = field(init=False)
 
     def __post_init__(self) -> None:
         self.secure_cookies = self.settings.public_url.startswith("https://")
+        self.workspace = Workspace(self.settings.database_url)
         self.allowed_origins = {self.settings.public_url, *self.settings.cors_origins}
         self.default_provider = self.settings.catalog()[self.settings.default_model].provider
 

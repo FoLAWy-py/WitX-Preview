@@ -86,7 +86,9 @@ test("a long task opens at its latest part, and the one before loads as the top 
   // The part came in above what was in view: the round at the top is still in sight,
   // the rounds before it above the view, to scroll up to.
   await expect(result(page, 11)).toBeInViewport();
-  expect((await result(page, 1).boundingBox())!.y).toBeLessThan(0);
+  await expect
+    .poll(async () => (await result(page, 1).boundingBox())?.y ?? Infinity)
+    .toBeLessThan(0);
 });
 
 test("a part that fails to load can be asked for again", async ({ page }) => {

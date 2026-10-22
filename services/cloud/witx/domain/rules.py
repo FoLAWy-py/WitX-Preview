@@ -1214,18 +1214,19 @@ def part_start(
 ) -> datetime | None:
     """Where the part of a task's conversation that ends at ``before`` starts (the
     latest part, without it). A part starts at a round, the start of a run of the main
-    agent: it takes rounds from the newest back until it holds ``PART_ACTIONS`` actions
-    or ``PART_ROUNDS`` rounds, and at least one. None: it reaches back to the task's
-    start, so nothing is earlier."""
+    agent: it takes rounds from the newest back while it holds no more than
+    ``PART_ACTIONS`` actions and ``PART_ROUNDS`` rounds, and always one. None: it
+    reaches back to the task's start, so nothing is earlier."""
     rounds = sorted((t for t in round_starts if before is None or t < before), reverse=True)
     times = sorted(t for t in action_times if before is None or t < before)
-    for taken, start in enumerate(rounds, start=1):
-        if taken == len(rounds):
-            return None
-        held = len(times) - bisect_left(times, start)
-        if held >= PART_ACTIONS or taken >= PART_ROUNDS:
-            return start
-    return None
+    start = None
+    for taken, at in enumerate(rounds, start=1):
+        if taken > 1 and len(times) - bisect_left(times, at) > PART_ACTIONS:
+            break  # this round would make the part too long
+        start = at
+        if taken == PART_ROUNDS:
+            break
+    return None if start is None or start == rounds[-1] else start
 
 
 # ---------------------------------------------------------------- deletion and retention (§19)

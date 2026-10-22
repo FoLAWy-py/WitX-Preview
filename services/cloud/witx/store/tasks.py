@@ -10,6 +10,7 @@ from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from witx.domain.model import PermissionMode, Task, TaskGroup, TaskStatus
+from witx.store import notices
 from witx.store.db import execute, fetch, fetch_one, jsonb
 
 _TASK = """id, tenant_id, goal, constraints, status, revision, control_revision, model,
@@ -199,6 +200,7 @@ async def pin(conn: AsyncConnection, tenant_id: UUID, user_id: UUID, task_id: UU
         u=user_id,
         task=task_id,
     )
+    await notices.notify(conn, "task", task_id=task_id, tenant_id=tenant_id)
     return True
 
 
@@ -206,6 +208,7 @@ async def unpin(conn: AsyncConnection, user_id: UUID, task_id: UUID) -> None:
     await execute(
         conn, "DELETE FROM task_pins WHERE user_id = :u AND task_id = :t", u=user_id, t=task_id
     )
+    await notices.notify(conn, "task", task_id=task_id)
 
 
 async def goals(conn: AsyncConnection, task_ids: Sequence[UUID]) -> dict[UUID, str]:
@@ -230,6 +233,8 @@ async def set_group(conn: AsyncConnection, task_id: UUID, group_id: UUID | None)
         id=task_id,
         g=group_id,
     )
+    if rows:
+        await notices.notify(conn, "task", task_id=task_id)
     return bool(rows)
 
 
@@ -261,6 +266,7 @@ async def create_group(
         name=name,
         user=user_id,
     )
+    await notices.notify(conn, "groups", tenant_id=tenant_id)
     return _group(rows[0])
 
 
@@ -271,12 +277,15 @@ async def rename_group(conn: AsyncConnection, group_id: UUID, name: str) -> Task
         id=group_id,
         name=name,
     )
+    if rows:
+        await notices.notify(conn, "groups")
     return _group(rows[0]) if rows else None
 
 
 async def delete_group(conn: AsyncConnection, group_id: UUID) -> None:
     """Its tasks stay, ungrouped (the foreign key clears their group)."""
     await execute(conn, "DELETE FROM task_groups WHERE id = :id", id=group_id)
+    await notices.notify(conn, "groups")
 
 
 async def update(conn: AsyncConnection, task_id: UUID, **fields: Any) -> None:
@@ -375,14 +384,19 @@ async def emit(conn: AsyncConnection, task: Task | UUID, type: str, **data: Any)
     commit order and a reader resuming from a cursor never skips a late commit.
     """
     task_id = task.id if isinstance(task, Task) else task
+    # The workspace's pages hear of it too, once this commits.
     row = await fetch_one(
         conn,
-        """WITH head AS (
+        f"""WITH head AS (
              UPDATE tasks SET event_seq = event_seq + 1 WHERE id = :t
-             RETURNING tenant_id, event_seq)
-           INSERT INTO events (tenant_id, task_id, seq, type, data)
-           SELECT tenant_id, :t, event_seq, :type, CAST(:data AS jsonb) FROM head
-           RETURNING seq""",
+             RETURNING tenant_id, event_seq),
+           added AS (
+             INSERT INTO events (tenant_id, task_id, seq, type, data)
+             SELECT tenant_id, :t, event_seq, :type, CAST(:data AS jsonb) FROM head
+             RETURNING tenant_id, seq)
+           SELECT seq, pg_notify('{notices.CHANNEL}', json_build_object(
+             'tenant', tenant_id::text, 'kind', 'task', 'task', CAST(:t AS text),
+             'type', CAST(:type AS text))::text) FROM added""",
         t=task_id,
         type=type,
         data=json.dumps(data, default=str, ensure_ascii=False),
@@ -560,13 +574,16 @@ async def set_title(conn: AsyncConnection, task_id: UUID, title: str | None) -> 
             conn, "UPDATE tasks SET title_tries = title_tries + 1 WHERE id = :id", id=task_id
         )
     else:
-        await execute(
+        row = await fetch_one(
             conn,
             # Titled outside any transaction: the task may have been deleted meanwhile.
-            "UPDATE tasks SET title = :t WHERE id = :id AND title IS NULL AND deleted_at IS NULL",
+            "UPDATE tasks SET title = :t WHERE id = :id AND title IS NULL AND deleted_at IS NULL"
+            " RETURNING tenant_id",
             t=title,
             id=task_id,
         )
+        if row is not None:
+            await notices.notify(conn, "task", task_id=task_id, tenant_id=row["tenant_id"])
 
 
 async def creator(conn: AsyncConnection, task_id: UUID) -> UUID:

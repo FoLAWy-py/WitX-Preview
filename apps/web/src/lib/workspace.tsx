@@ -17,10 +17,14 @@ import type {
   TaskSummary,
 } from "@/api/types.gen";
 import { useAuth } from "@/lib/auth";
+import { follow } from "@/lib/follow";
 import { useAsync, type AsyncState } from "@/lib/useAsync";
 
-/** How often task lists refresh while the page is visible. */
-const TASKS_MS = 5_000;
+/** How often the workspace loads again anyway while the page is visible: changes are
+ * pushed, this is for one that ever goes without its notice. */
+const FALLBACK_MS = 60_000;
+/** Notices this close together are one burst, loaded once. */
+const NOTICE_BURST_MS = 200;
 
 interface Workspace {
   /** Tasks waiting for someone (an approval, an answer, an unknown effect). */
@@ -33,6 +37,8 @@ interface Workspace {
   reloadModels: () => Promise<void>;
   /** Counts up whenever task lists should load again. */
   tick: number;
+  /** Counts up whenever devices and their pools should load again. */
+  devicesTick: number;
   /** After a change to tasks or groups: every list loads again now. */
   refresh: () => void;
 }
@@ -66,14 +72,57 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const schedules = useAsync(() => api.schedules(), [api]);
   const models = useAsync(() => api.models(), [api]);
   const [tick, setTick] = useState(0);
+  const [devicesTick, setDevicesTick] = useState(0);
   const refresh = useCallback(() => {
     setTick((n) => n + 1);
     void attention.reload();
     void groups.reload();
   }, [attention, groups]);
-  useVisibleInterval(refresh, TASKS_MS);
-  useVisibleInterval(() => void devices.reload(), 10_000);
-  useVisibleInterval(() => void schedules.reload(), 30_000);
+  const reloadDevices = useCallback(() => {
+    setDevicesTick((n) => n + 1);
+    void devices.reload();
+  }, [devices]);
+
+  // What changed is pushed: each burst of notices loads again the kinds it
+  // names, and connecting (again) loads everything, since notices are not kept.
+  const latest = useRef({ refresh, reloadDevices, schedules });
+  latest.current = { refresh, reloadDevices, schedules };
+  useEffect(() => {
+    let named = new Set<string>();
+    let burst: ReturnType<typeof setTimeout> | undefined;
+    const load = (kinds: Set<string>) => {
+      const all = kinds.has("all");
+      const now = latest.current;
+      if (all || kinds.has("task") || kinds.has("groups")) now.refresh();
+      if (all || kinds.has("devices")) now.reloadDevices();
+      if (all || kinds.has("schedules")) void now.schedules.reload();
+    };
+    const stop = follow(
+      (after, handlers, signal) => api.workspaceEvents(after, handlers, signal),
+      {
+        onEvent: (event) => {
+          named.add(event.type);
+          clearTimeout(burst);
+          burst = setTimeout(() => {
+            const kinds = named;
+            named = new Set();
+            load(kinds);
+          }, NOTICE_BURST_MS);
+        },
+        onConnection: (up, reconnected) => {
+          if (up && reconnected) load(new Set(["all"]));
+        },
+      },
+    );
+    return () => {
+      stop();
+      clearTimeout(burst);
+    };
+  }, [api]);
+  // In case a change ever goes without its notice.
+  useVisibleInterval(refresh, FALLBACK_MS);
+  useVisibleInterval(reloadDevices, FALLBACK_MS);
+  useVisibleInterval(() => void schedules.reload(), FALLBACK_MS);
   const value = useMemo(
     () => ({
       attention,
@@ -83,9 +132,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       models: models.data ?? [],
       reloadModels: models.reload,
       tick,
+      devicesTick,
       refresh,
     }),
-    [attention, groups, devices, schedules, models, tick, refresh],
+    [attention, groups, devices, schedules, models, tick, devicesTick, refresh],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
