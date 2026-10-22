@@ -117,9 +117,9 @@ class TenantSettings(Wire):
     allow_full_access: bool | None = None
     # The risk check tries OpenAI's Decisions API first.
     fast_risk_check: bool | None = None
-    # The model providers the organisation's screenshots and text may go to .
+    # The model providers the organisation's screenshots and text may go to.
     allowed_providers: list[str] | None = None
-    # A task whose model keeps failing switches to another allowed model .
+    # A task whose model keeps failing switches to another allowed model.
     model_fallback: bool | None = None
 
 
@@ -139,7 +139,7 @@ class ApprovalDecision(Wire):
 
 
 class PurchaseChoice(Wire):
-    """A person's choice among the purchase options ; null chooses none."""
+    """A person's choice among the purchase options; null chooses none."""
 
     option: int | None = Field(default=None, ge=0)
 
@@ -165,7 +165,7 @@ class Me(Wire):
     allowed_providers: list[str]  # where the organisation's data may go
     model_fallback: bool
     auto_memory: bool = True  # agents keep what they learn for this person
-    # Retention : screenshots of this person's finished tasks, and the summary
+    # Retention: screenshots of this person's finished tasks, and the summary
     # a deleted task leaves, are kept this many days. The person chooses the first, up to
     # the deployment's most.
     screenshot_retention_days: int
@@ -413,6 +413,8 @@ class TaskResult(Wire):
     # A round the system ended, not the agent: why, so the web can say it in the reader's
     # language (``summary`` has it in English).
     failure: Literal["step_limit"] | None = None
+    # The agent offers to keep how it was done as a skill: a button under the summary.
+    offer_skill: bool = False
 
 
 class UsageView(Wire):
@@ -527,8 +529,8 @@ class PluginFileView(Wire):
 
 
 class PluginOfferView(Wire):
-    """A plugin a marketplace lists now, to read before installing or updating it: installing it
-    is bound to this commit and digest."""
+    """A plugin a marketplace lists now, to read before installing or updating it
+    : installing it is bound to this commit and digest."""
 
     name: str
     version: str  # "" when it could not be read
@@ -553,11 +555,27 @@ class PlanStepView(Wire):
 
 
 class NoteView(Wire):
-    """Something the agent wrote down from a screenshot: true when it was seen."""
+    """Something the agent wrote down from a screenshot (D6, #74): true when it was seen."""
 
     text: str
+    run_id: UUID  # the run that wrote it
     observation_id: UUID | None
     seen_at: datetime | None
+
+
+class EventView(Wire):
+    """One entry of a task's ordered event stream (also the SSE payload)."""
+
+    seq: int
+    type: str
+    data: dict[str, Any]
+    created_at: datetime
+
+
+class EarlierView(Wire):
+    """The part of a task its page has not loaded: everything before ``before``."""
+
+    before: datetime
 
 
 class TaskDetail(Wire):
@@ -593,15 +611,34 @@ class TaskDetail(Wire):
     last_event_seq: int
     created_at: datetime
     updated_at: datetime
+    # Long tasks come in parts: actions, observations and notes hold the part from
+    # ``earlier.before`` on, with every action not finished or of unknown effect and the
+    # screenshots those and the part's results show; None when that is the whole task.
+    earlier: EarlierView | None = None
+    events: list[EventView] = Field(default_factory=list)  # asked for by type: the part's
 
 
-class EventView(Wire):
-    """One entry of a task's ordered event stream (also the SSE payload)."""
+class TaskChanges(TaskDetail):
+    """What changed in a task after the event ``since``. The task's own fields and its
+    short lists are whole, as in ``TaskDetail``; ``actions``, ``observations`` and
+    ``runs`` hold only those that the events after ``since`` name and those not finished
+    yet, and ``notes`` only the notes of those runs, all of them. ``last_event_seq`` is
+    where the next one starts. ``earlier`` and ``events`` are left empty: the page keeps
+    its own part, and events come on the stream."""
 
-    seq: int
-    type: str
-    data: dict[str, Any]
-    created_at: datetime
+    since: int
+
+
+class TaskEarlier(Wire):
+    """The part of a task before ``before``, by the same rule as the first: its
+    actions, screenshots, notes and the events of the types asked for, and whether an
+    earlier part remains."""
+
+    actions: list[ActionView]
+    observations: list[ObservationView]
+    notes: list[NoteView]
+    events: list[EventView]
+    earlier: EarlierView | None
 
 
 # ---------------------------------------------------------------- takeover

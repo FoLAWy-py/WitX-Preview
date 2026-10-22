@@ -529,11 +529,15 @@ TOOLS: list[dict[str, Any]] = [
         "complete_task",
         "Finish: the goal is achieved. Cite the screenshots that show it: one taken after "
         "your last input, and for each earlier change you report (a setting, a saved item) "
-        "the screenshot where you saw it take effect. Not yet if the task took about ten "
-        "inputs or more, with wrong turns, and no skill covered it: first ask_user once "
-        "whether to keep how it was done as a skill.",
+        "the screenshot where you saw it take effect. Set offer_skill when the task took "
+        "about ten inputs or more, with wrong turns, and no skill covered it.",
         {
             "summary": _string("What was achieved, and anything left undone."),
+            "offer_skill": {
+                "type": "boolean",
+                "description": "Offer to keep how this task was done as a skill: the user "
+                "gets a button under your summary. Do not ask about it yourself.",
+            },
             "evidence_observation_ids": {
                 "type": "array",
                 "items": {"type": "string"},

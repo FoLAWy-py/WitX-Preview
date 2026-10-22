@@ -20,6 +20,7 @@ Browser ── HTTPS / SSE ── API + Hub ── PostgreSQL
 - Three permission modes, independent risk assessment, approval of specific actions, and execution audit records.
 - Pause, stop, manual takeover, and state recovery after disconnects or process restarts.
 - Long-term memory, user-authored Skills (including splitting one task into multiple Skills), and Plugins with reviewable versions and contents.
+- Long task conversations open at recent rounds; scroll up to read earlier ones.
 - English and Simplified Chinese, with light and dark themes.
 
 ## Prerequisites

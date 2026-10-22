@@ -1,9 +1,12 @@
 """Maps stored records to the API's response models."""
 
+from collections.abc import Collection, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
+from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 from witx_contracts import api
 
@@ -80,6 +83,7 @@ def _result(data: dict[str, Any], fallback: datetime) -> api.TaskResult:
         evidence_observation_ids=data.get("evidence_observation_ids", []),
         completed_at=data.get("completed_at", fallback),
         failure=data.get("failure"),
+        offer_skill=data.get("offer_skill", False),
     )
 
 
@@ -243,10 +247,160 @@ async def _plan(conn: AsyncConnection, task: Task) -> list[api.PlanStepView]:
     return [api.PlanStepView.model_validate(p) for p in plan]
 
 
-async def task_detail(conn: AsyncConnection, task: Task) -> api.TaskDetail:
+# Records changed after an event, by kind: "actions", "observations", "runs".
+Changed = dict[str, set[UUID]]
+
+# The keys of an event's data that name a record a task's page shows, and its kind.
+_NAMES = {
+    "action_id": "actions",
+    "observation_id": "observations",
+    "run_id": "runs",
+    "to_run_id": "runs",
+    "parent_run_id": "runs",
+}
+
+
+async def _named(conn: AsyncConnection, task_id: UUID, since: int, through: int) -> Changed:
+    """The actions, screenshots and runs that the task's events after ``since`` (up to
+    ``through``) name: every write to one of them emits an event that names it."""
+    named: Changed = {"actions": set(), "observations": set(), "runs": set()}
+    while since < through:
+        rows = await tasks.events_after(conn, task_id, since)
+        if not rows:
+            break
+        for row in rows:
+            if row["seq"] > through:
+                return named
+            for key, kind in _NAMES.items():
+                value = row["data"].get(key)
+                if isinstance(value, str):
+                    with suppress(ValueError):
+                        named[kind].add(UUID(value))
+        since = rows[-1]["seq"]
+    return named
+
+
+async def task_detail(
+    conn: AsyncConnection,
+    task: Task,
+    start: datetime | Literal["latest"] | None = "latest",
+    types: Collection[str] = (),
+) -> api.TaskDetail:
+    """What the task's page shows, from ``start`` on: by default the latest part
+    (``rules.part_start``), or from the time the page asks for, or (None) all of it.
+    ``types``: the events of these kinds in that part come with it."""
+    return api.TaskDetail(**await _detail(conn, task, start=start, types=types))
+
+
+async def task_earlier(
+    conn: AsyncConnection, task: Task, before: datetime, types: Collection[str] = ()
+) -> api.TaskEarlier:
+    """The part of the task before ``before``, by the rule of the first part."""
+    last_event_seq = await tasks.last_event_seq(conn, task.id)
+    run_list = await runs.for_task(conn, task.id)
+    start = rules.part_start(
+        [r.created_at for r in run_list if r.parent_run_id is None],
+        await execution.action_times(conn, task.id),
+        before=before,
+    )
     now = datetime.now(UTC)
-    actions = await execution.task_actions(conn, task.id)
+    actions = await execution.task_actions(conn, task.id, start=start, end=before)
     approvals = await execution.approvals_for(conn, [a.id for a in actions])
+    shown = _shots_of(actions, [r for r in run_list if _within(r.created_at, start, before)])
+    return api.TaskEarlier(
+        actions=[action_view(a, approvals.get(a.id), now) for a in actions],
+        observations=[
+            _observation(o)
+            for o in await execution.task_observations(
+                conn, task.id, start=start, end=before, also=shown
+            )
+        ],
+        notes=[_note(n) for n in await runs.task_notes(conn, task.id, start=start, end=before)],
+        events=[
+            _event(e)
+            for e in await tasks.events_between(conn, task.id, types, start, before, last_event_seq)
+        ],
+        earlier=api.EarlierView(before=start) if start else None,
+    )
+
+
+def _within(at: datetime, start: datetime | None, end: datetime | None) -> bool:
+    return (start is None or at >= start) and (end is None or at < end)
+
+
+def _shots_of(actions: Sequence[Action], run_list: Sequence[Run]) -> set[UUID]:
+    """The screenshots these actions were based on and left, and those these runs'
+    results show."""
+    shots = {i for a in actions for i in (a.observation_id, a.post_observation_id) if i}
+    for run in run_list:
+        for i in (run.result or {}).get("evidence_observation_ids", []):
+            with suppress(ValueError, TypeError):
+                shots.add(UUID(str(i)))
+    return shots
+
+
+def _note(n: RowMapping) -> api.NoteView:
+    return api.NoteView(
+        text=str(n["text"])[:1000],
+        run_id=n["run_id"],
+        observation_id=n["observation_id"],
+        seen_at=n["captured_at"],
+    )
+
+
+def _event(row: RowMapping) -> api.EventView:
+    return api.EventView(
+        seq=row["seq"], type=row["type"], data=row["data"], created_at=row["created_at"]
+    )
+
+
+async def task_changes(
+    conn: AsyncConnection, task: Task, since: int, held_open: Collection[UUID] = ()
+) -> api.TaskChanges:
+    """What changed after the event ``since``: see ``api.TaskChanges``. ``held_open`` are
+    the records the page holds as not finished: they come too, as some finish with no
+    event that names them (a run or input cancelled as the task stops, a screenshot that
+    timed out)."""
+    return api.TaskChanges(
+        **await _detail(conn, task, since=since, held_open=held_open), since=since
+    )
+
+
+async def _detail(
+    conn: AsyncConnection,
+    task: Task,
+    *,
+    since: int | None = None,
+    held_open: Collection[UUID] = (),
+    start: datetime | Literal["latest"] | None = None,
+    types: Collection[str] = (),
+) -> dict[str, Any]:
+    # Read first: a change committed after this has a later event, so the next changes
+    # from here include it, while a change seen below and named again is only sent twice.
+    last_event_seq = await tasks.last_event_seq(conn, task.id)
+    changed = None if since is None else await _named(conn, task.id, since, last_event_seq)
+    if changed is not None:
+        for ids in changed.values():
+            ids |= set(held_open)
+
+    def only(kind: str) -> set[UUID] | None:
+        return None if changed is None else changed[kind]
+
+    run_list = await runs.for_task(conn, task.id, changed=only("runs"))
+    if start == "latest":
+        start = rules.part_start(
+            [r.created_at for r in run_list if r.parent_run_id is None],
+            await execution.action_times(conn, task.id),
+        )
+    if changed is not None or (start is not None and start <= task.created_at):
+        start = None  # changes are not in parts; a part from the start is all of it
+    now = datetime.now(UTC)
+    actions = await execution.task_actions(conn, task.id, changed=only("actions"), start=start)
+    approvals = await execution.approvals_for(conn, [a.id for a in actions])
+    shown: set[UUID] = set()
+    if start is not None:
+        shown = _shots_of(actions, [r for r in run_list if r.created_at >= start])
+        shown |= set(await execution.latest_shots(conn, task.id))
     intents = await purchases.for_task(conn, task.id)
     # Which of the person's messages the main agent has not read yet.
     read_through = await runs.read_through(conn, task.id)
@@ -263,7 +417,7 @@ async def task_detail(conn: AsyncConnection, task: Task) -> api.TaskDetail:
     windows = rules.goal_windows(
         task.created_at, from_start, [(c["at"], c["kind"]) for c in changes], now
     )
-    return api.TaskDetail(
+    return dict(
         id=task.id,
         created_by=await tasks.creator(conn, task.id),
         goal_paused=task.goal_paused,
@@ -302,22 +456,35 @@ async def task_detail(conn: AsyncConnection, task: Task) -> api.TaskDetail:
             )
             for i in await tasks.inputs(conn, task.id)
         ],
-        runs=[_run(r) for r in await runs.for_task(conn, task.id)],
+        runs=[_run(r) for r in run_list],
         actions=[action_view(a, approvals.get(a.id), now) for a in actions],
         grants=[grant_view(g, task, now) for g in await execution.task_grants(conn, task.id)],
         purchases=[purchase_view(p, i == len(intents) - 1) for i, p in enumerate(intents)],
         plan=await _plan(conn, task),
         memories=[memory_view(m) for m in await memory_store.from_task(conn, task.id)],
         notes=[
-            api.NoteView(
-                text=str(n["text"])[:1000],
-                observation_id=n["observation_id"],
-                seen_at=n["captured_at"],
+            _note(n)
+            for n in await runs.task_notes(
+                conn,
+                task.id,
+                runs=None if changed is None else [r.id for r in run_list],
+                start=start,
             )
-            for n in await runs.task_notes(conn, task.id)
         ],
-        observations=[_observation(o) for o in await execution.task_observations(conn, task.id)],
-        last_event_seq=await tasks.last_event_seq(conn, task.id),
+        observations=[
+            _observation(o)
+            for o in await execution.task_observations(
+                conn, task.id, changed=only("observations"), start=start, also=shown
+            )
+        ],
+        events=[
+            _event(e)
+            for e in await tasks.events_between(conn, task.id, types, start, None, last_event_seq)
+        ]
+        if types and changed is None
+        else [],
+        earlier=api.EarlierView(before=start) if start else None,
+        last_event_seq=last_event_seq,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )

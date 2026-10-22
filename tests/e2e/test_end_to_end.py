@@ -25,7 +25,7 @@ from witx_gateway.devices.fake import FakeDevice
 from witx_gateway.journal import Journal
 
 from tests.cloud.rig import last_screenshot
-from tests.cloud.support import FakeRisk, ScriptedModel, call, provision
+from tests.cloud.support import FakeRisk, ScriptedModel, call, provision, say
 from tests.conftest import Databases
 from tests.gateway.keystore import stored
 
@@ -166,6 +166,52 @@ async def test_a_task_runs_from_the_web_api_to_the_phone_and_back(system) -> Non
                 if line.startswith("event: task.status"):
                     break
         assert lines[0] == "id: 1" and "event: task.created" in lines
+
+
+async def frames(lines: AsyncIterator[str], until_seq: int) -> list[tuple[int, str]]:
+    """The next events of an event stream's lines, as (seq, type), up to the one numbered
+    ``until_seq``."""
+    seen: list[tuple[int, str]] = []
+    seq = 0
+    async for line in lines:
+        if line.startswith("id: "):
+            seq = int(line[4:])
+        elif line.startswith("event: ") and line != "event: agent.saying":
+            seen.append((seq, line[7:]))
+            if seq >= until_seq:
+                break
+    return seen
+
+
+async def test_a_replay_holds_only_the_kinds_asked_for_and_every_later_event(system) -> None:  # type: ignore[no-untyped-def]
+    base, model, _, worker = system
+    model.script = [
+        [say("Hello."), call("complete_task", summary="done", evidence_observation_ids=[])]
+    ]
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    async with httpx.AsyncClient(base_url=base, headers=auth, timeout=10) as web:
+        created = await web.post("/api/v1/tasks", json={"goal": "Say hello", "device_ids": []})
+        task_id = created.json()["id"]
+        for _ in range(100):
+            await worker.run_once()
+            if (await web.get(f"/api/v1/tasks/{task_id}")).json()["status"] == "completed":
+                break
+        head = (await web.get(f"/api/v1/tasks/{task_id}")).json()["last_event_seq"]
+        async with web.stream("GET", f"/api/v1/tasks/{task_id}/events") as stream:
+            everything = await frames(stream.aiter_lines(), head)
+        wanted = {"task.created", "agent.message"}
+        kept = [(seq, kind) for seq, kind in everything if kind in wanted]
+        assert len(kept) == 2 and len(everything) > len(kept)
+
+        url = f"/api/v1/tasks/{task_id}/events?types=task.created,agent.message"
+        async with web.stream("GET", url) as stream:
+            lines = stream.aiter_lines()
+            assert await frames(lines, kept[-1][0]) == kept
+            # A message sent now is an event the replay would have left out: it comes.
+            sent = await web.post(f"/api/v1/tasks/{task_id}/inputs", json={"text": "Again"})
+            assert sent.status_code == 200
+            later = await frames(lines, head + 1)
+        assert (head + 1, "input.added") in later
 
 
 async def test_requests_need_a_valid_token(system) -> None:  # type: ignore[no-untyped-def]

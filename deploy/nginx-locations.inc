@@ -6,6 +6,16 @@ add_header X-Content-Type-Options nosniff always;
 add_header X-Frame-Options DENY always;
 add_header Referrer-Policy same-origin always;
 
+# Text goes out compressed: the app's files as compressed when the image was built
+# (gzip_static), the API's JSON as it is sent. Server-sent events are not in gzip_types,
+# so each event still leaves at once; screenshots are images and already compressed.
+gzip on;
+gzip_static on;
+gzip_vary on;
+gzip_proxied any;
+gzip_min_length 1024;
+gzip_types application/json application/javascript text/css image/svg+xml;
+
 # Metrics and readiness are for the monitoring system on the internal network.
 location = /metrics      { return 404; }
 location /health         { return 404; }

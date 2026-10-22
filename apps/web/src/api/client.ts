@@ -37,7 +37,9 @@ import type {
   SkillVersionView,
   SkillView,
   SideMessageView,
+  TaskChanges,
   TaskDetail,
+  TaskEarlier,
   TaskInputCreate,
   TaskGroupView,
   TaskSummary,
@@ -52,6 +54,31 @@ const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 // again under the same Idempotency-Key, so the server acts on it at most once.
 const WRITE_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
+
+export interface TaskFilter {
+  group?: string;
+  attention?: boolean;
+  q?: string;
+  limit?: number;
+  /** Only the tasks the signed-in person pinned, or none of them. */
+  pinned?: "only" | "without";
+}
+
+function tasksPath(filter: TaskFilter): string {
+  const query = new URLSearchParams();
+  if (filter.q) query.set("q", filter.q);
+  if (filter.pinned) query.set("pinned", filter.pinned);
+  if (filter.group) query.set("group", filter.group);
+  if (filter.attention) query.set("attention", "true");
+  if (filter.limit) query.set("limit", String(filter.limit));
+  const qs = query.toString();
+  return `/api/v1/tasks${qs ? `?${qs}` : ""}`;
+}
+
+/** The next page's path from a `Link: <…>; rel="next"` header, if more follow. */
+export function nextPage(link: string | null): string | undefined {
+  return link?.match(/<([^>]+)>\s*;\s*rel="next"/)?.[1];
+}
 
 export class ApiError extends Error {
   constructor(
@@ -89,7 +116,7 @@ function csrfToken(): string | undefined {
 
 /**
  * Thin typed wrapper around the cloud's /api/v1. The browser is signed in by an
- * HttpOnly session cookie that this code never sees ; every write echoes
+ * HttpOnly session cookie that this code never sees; every write echoes
  * the CSRF token.
  */
 export class Api {
@@ -184,7 +211,7 @@ export class Api {
   devLogin = (token: string) =>
     this.post<void>("/api/v1/auth/dev-login", { token });
   logout = () => this.post<void>("/api/v1/auth/logout", {});
-  /** Deletes a finished task; it disappears at once . */
+  /** Deletes a finished task; it disappears at once. */
   deleteTask = async (taskId: string) => {
     await this.request(`/api/v1/tasks/${taskId}`, { method: "DELETE" });
   };
@@ -212,24 +239,16 @@ export class Api {
   unpinTask = async (id: string) => {
     await this.request(`/api/v1/tasks/${id}/pin`, { method: "DELETE" });
   };
-  tasks = (
-    filter: {
-      group?: string;
-      attention?: boolean;
-      q?: string;
-      limit?: number;
-      /** Only the tasks the signed-in person pinned, or none of them. */
-      pinned?: "only" | "without";
-    } = {},
-  ) => {
-    const query = new URLSearchParams();
-    if (filter.q) query.set("q", filter.q);
-    if (filter.pinned) query.set("pinned", filter.pinned);
-    if (filter.group) query.set("group", filter.group);
-    if (filter.attention) query.set("attention", "true");
-    if (filter.limit) query.set("limit", String(filter.limit));
-    const qs = query.toString();
-    return this.json<TaskSummary[]>(`/api/v1/tasks${qs ? `?${qs}` : ""}`);
+  tasks = (filter: TaskFilter = {}) =>
+    this.json<TaskSummary[]>(tasksPath(filter));
+  /** One page of a task list: the first, or the one at `next` from the page before. */
+  taskPage = async (
+    filter: TaskFilter,
+    next?: string,
+  ): Promise<{ tasks: TaskSummary[]; next?: string }> => {
+    const response = await this.request(next ?? tasksPath(filter));
+    const tasks = (await response.json()) as TaskSummary[];
+    return { tasks, next: nextPage(response.headers.get("Link")) };
   };
   taskGroups = () => this.json<TaskGroupView[]>("/api/v1/task-groups");
   createTaskGroup = (name: string) =>
@@ -243,7 +262,32 @@ export class Api {
     this.put<TaskSummary>(`/api/v1/tasks/${taskId}/group`, {
       group_id: groupId,
     });
-  task = (id: string) => this.json<TaskDetail>(`/api/v1/tasks/${id}`);
+  /** The task as its page shows it: the latest part of a long one, or from
+   * `from` on; with `types`, the events of those kinds in it. */
+  task = (
+    id: string,
+    part: { from?: string; types?: Iterable<string> } = {},
+  ) => {
+    const query = new URLSearchParams();
+    if (part.from) query.set("from", part.from);
+    if (part.types) query.set("types", [...part.types].join(","));
+    const qs = query.toString();
+    return this.json<TaskDetail>(`/api/v1/tasks/${id}${qs ? `?${qs}` : ""}`);
+  };
+  /** The part of a task before `before` (its `earlier`). */
+  taskEarlier = (id: string, before: string, types: Iterable<string>) =>
+    this.json<TaskEarlier>(
+      `/api/v1/tasks/${id}/earlier?${new URLSearchParams({
+        before,
+        types: [...types].join(","),
+      }).toString()}`,
+    );
+  /** What changed in the task after the event `since`, with the records `open` (not
+   * finished as the page holds them) as they are now (see `applyChanges`). */
+  taskChanges = (id: string, since: number, open: string[]) =>
+    this.json<TaskChanges>(
+      `/api/v1/tasks/${id}/changes?since=${since}&open=${open.join(",")}`,
+    );
   schedules = () => this.json<ScheduleView[]>("/api/v1/schedules");
   createSchedule = (body: ScheduleCreate) =>
     this.post<ScheduleView>("/api/v1/schedules", body);
@@ -391,9 +435,12 @@ export class Api {
     after: number,
     handlers: StreamHandlers,
     signal: AbortSignal,
+    /** Of the events stored before the stream opens, only these types; all later ones. */
+    types?: readonly string[],
   ): Promise<void> {
+    const only = types ? `&types=${types.join(",")}` : "";
     const response = await this.request(
-      `/api/v1/tasks/${taskId}/events?after=${after}`,
+      `/api/v1/tasks/${taskId}/events?after=${after}${only}`,
       {
         signal,
       },

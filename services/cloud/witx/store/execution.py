@@ -1,5 +1,6 @@
 """Observations, actions and approvals."""
 
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -8,6 +9,7 @@ from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from witx.domain.model import (
+    OPEN_ACTION,
     Action,
     ActionStatus,
     Approval,
@@ -79,13 +81,55 @@ async def observations(conn: AsyncConnection, ids: list[UUID]) -> list[Observati
     return [_observation(r) for r in rows]
 
 
-async def task_observations(conn: AsyncConnection, task_id: UUID) -> list[Observation]:
+async def task_observations(
+    conn: AsyncConnection,
+    task_id: UUID,
+    *,
+    changed: Collection[UUID] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    also: Collection[UUID] = (),
+) -> list[Observation]:
+    """The task's screenshots; with ``changed``, only those and the ones not taken yet;
+    with ``start`` or ``end``, only those asked for from ``start`` and before ``end``,
+    and ``also`` these."""
+    where, params = ["task_id = :t"], {"t": task_id, "ids": list(changed or ())}
+    if changed is not None:
+        where.append("(id = ANY(:ids) OR status IN ('requested', 'sent'))")
+    if start is not None or end is not None:
+        where.append(f"({_between('requested_at', start, end, params)} OR id = ANY(:also))")
+        params["also"] = list(also)
     rows = await fetch(
         conn,
-        f"SELECT {_OBS} FROM observations WHERE task_id = :t ORDER BY requested_at",
-        t=task_id,
+        f"SELECT {_OBS} FROM observations WHERE {' AND '.join(where)} ORDER BY requested_at",
+        **params,
     )
     return [_observation(r) for r in rows]
+
+
+def _between(
+    column: str, start: datetime | None, end: datetime | None, params: dict[str, Any]
+) -> str:
+    """``column`` from ``start`` (when given) and before ``end`` (when given)."""
+    params["start"], params["end"] = start, end
+    parts = []
+    if start is not None:
+        parts.append(f"{column} >= :start")
+    if end is not None:
+        parts.append(f"{column} < :end")
+    return " AND ".join(parts) or "true"
+
+
+async def latest_shots(conn: AsyncConnection, task_id: UUID) -> list[UUID]:
+    """Each device's latest screenshot taken for the task."""
+    rows = await fetch(
+        conn,
+        """SELECT DISTINCT ON (device_id) id FROM observations
+            WHERE task_id = :t AND status = 'complete'
+            ORDER BY device_id, captured_at DESC""",
+        t=task_id,
+    )
+    return [r["id"] for r in rows]
 
 
 async def first_observation(
@@ -344,11 +388,40 @@ async def get_action(
     return _action(row) if row else None
 
 
-async def task_actions(conn: AsyncConnection, task_id: UUID) -> list[Action]:
+async def task_actions(
+    conn: AsyncConnection,
+    task_id: UUID,
+    *,
+    changed: Collection[UUID] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[Action]:
+    """The task's actions. With ``changed``, only those and the open ones (an approval
+    that waits can expire without anything else happening). With ``start`` or ``end``,
+    only those made from ``start`` and before ``end``; with ``start`` alone, also every
+    open one and every one whose effect is unknown, however old: the person settles
+    those, and a part of the task not loaded must not hide them."""
+    open_ = [s.value for s in OPEN_ACTION]
+    where, params = ["task_id = :t"], {"t": task_id, "ids": list(changed or ()), "open": open_}
+    if changed is not None:
+        where.append("(id = ANY(:ids) OR status = ANY(:open))")
+    if start is not None or end is not None:
+        part = _between("created_at", start, end, params)
+        if end is None:
+            part = f"({part} OR status = ANY(:open) OR effect = 'unknown')"
+        where.append(part)
     rows = await fetch(
-        conn, f"SELECT {_ACTION} FROM actions WHERE task_id = :t ORDER BY created_at", t=task_id
+        conn,
+        f"SELECT {_ACTION} FROM actions WHERE {' AND '.join(where)} ORDER BY created_at",
+        **params,
     )
     return [_action(r) for r in rows]
+
+
+async def action_times(conn: AsyncConnection, task_id: UUID) -> list[datetime]:
+    """When each of the task's actions was made: where its page's parts start."""
+    rows = await fetch(conn, "SELECT created_at FROM actions WHERE task_id = :t", t=task_id)
+    return [r["created_at"] for r in rows]
 
 
 async def action_by_post_observation(conn: AsyncConnection, obs_id: UUID) -> UUID | None:

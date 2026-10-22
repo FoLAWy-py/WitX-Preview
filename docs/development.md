@@ -63,9 +63,11 @@ docker compose -f deploy/compose.yaml run --rm api admin add-user --tenant demo 
 docker compose -f deploy/compose.yaml run --rm api admin add-gateway --tenant demo --name gateway-host
 ```
 
-Compose 提供 PostgreSQL、迁移、API / Hub、Worker 和 Nginx。按 `deploy/nginx.conf` 的示例配置 TLS、证书挂载及 443 端口，设置正确的 `WITX_PUBLIC_URL`。请勿把开发令牌认证暴露到公网。Gateway 在手机旁的宿主机运行，不在云端容器里；Linux / macOS 服务模板位于 `deploy/gateway`。
+Compose 提供 PostgreSQL、迁移、API / Hub、Worker 和 Nginx。Web 镜像在构建时预压缩文本静态文件，Nginx 发送对应的 gzip 文件并压缩 API JSON；SSE 事件和截图不走这项压缩。按 `deploy/nginx.conf` 的示例配置 TLS、证书挂载及 443 端口，设置正确的 `WITX_PUBLIC_URL`。请勿把开发令牌认证暴露到公网。Gateway 在手机旁的宿主机运行，不在云端容器里；Linux / macOS 服务模板位于 `deploy/gateway`。
 
 截图和 Plugin 默认在私有卷；可配置 S3 兼容对象存储。API 的 `/health/ready` 检查数据库和对象存储，`witx check` 额外检查模型目录可用性；模型列表可用不保证每次推理成功。日志默认结构化并脱敏，`/metrics` 需要配置 token。扩展 API 实例时，人工接管和 MCP 会话需要粘性路由。
+
+更新已有部署时先备份，并让迁移服务执行新增的编号迁移；任务列表分页使用迁移 `0036_task_list_pages.sql` 中的索引。
 
 ## iOS 文字输入
 

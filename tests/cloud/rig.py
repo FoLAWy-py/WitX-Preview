@@ -57,6 +57,8 @@ class SimulatedGateway:
     field_read: bool = True  # False: the field could not be read back after type_text
     capture_error: str | None = None  # screenshots fail with this, if set
     sliders: list[dict[str, Any]] = field(default_factory=list)  # sliders in view
+    same_picture: bool = False  # every screenshot is the same picture, as on a static screen
+    shots: int = 0  # screenshots taken; each is another shade of grey unless same_picture
 
 
 class Rig:
@@ -185,7 +187,9 @@ class Rig:
 
     async def capture(self, observation_id: UUID, screen: dict[str, Any] | None = None) -> None:
         screen = screen or SCREEN | {"sliders": self.gateway.sliders}
-        data = png(screen["width"], screen["height"])
+        g = self.gateway
+        g.shots += 1
+        data = png(screen["width"], screen["height"], 0x80 if g.same_picture else g.shots % 256)
         await self.objects.put(screenshot_key(self.tenant.id, observation_id), data, "image/png")
         await self.handle(
             wire.ObservationResult(

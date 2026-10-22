@@ -73,6 +73,10 @@ export interface DevicesUpdate {
   device_ids: string[];
 }
 
+export interface EarlierView {
+  before: string;
+}
+
 export interface EventView {
   seq: number;
   type: string;
@@ -187,6 +191,7 @@ export interface ModelView {
 
 export interface NoteView {
   text: string;
+  run_id: string;
   observation_id: string | null;
   seen_at: string | null;
 }
@@ -458,6 +463,43 @@ export interface TakeoverView {
   expires_at: string;
 }
 
+export interface TaskChanges {
+  id: string;
+  created_by?: string | null;
+  request: string;
+  goal: string;
+  goal_paused: boolean;
+  plan_mode: boolean;
+  agent_ms: number;
+  goal_ms: number;
+  working: boolean;
+  title: string | null;
+  constraints: string[];
+  device_ids: string[];
+  status: "active" | "pausing" | "paused" | "stopping" | "stopped" | "completed" | "failed";
+  revision: number;
+  model: string;
+  reasoning_effort: "low" | "medium" | "high" | "xhigh" | "max";
+  permission_mode: "ask" | "auto" | "full";
+  usage: UsageView;
+  result: TaskResult | null;
+  inputs: TaskInputView[];
+  runs: RunView[];
+  actions: ActionView[];
+  grants: GrantView[];
+  purchases: PurchaseView[];
+  plan: PlanStepView[];
+  notes: NoteView[];
+  memories: MemoryView[];
+  observations: ObservationView[];
+  last_event_seq: number;
+  created_at: string;
+  updated_at: string;
+  earlier?: EarlierView | null;
+  events?: EventView[];
+  since: number;
+}
+
 export interface TaskCreate {
   goal: string;
   constraints?: string[];
@@ -501,6 +543,16 @@ export interface TaskDetail {
   last_event_seq: number;
   created_at: string;
   updated_at: string;
+  earlier?: EarlierView | null;
+  events?: EventView[];
+}
+
+export interface TaskEarlier {
+  actions: ActionView[];
+  observations: ObservationView[];
+  notes: NoteView[];
+  events: EventView[];
+  earlier: EarlierView | null;
 }
 
 export interface TaskGroupMove {
@@ -537,6 +589,7 @@ export interface TaskResult {
   evidence_observation_ids: string[];
   completed_at: string;
   failure?: "step_limit" | null;
+  offer_skill?: boolean;
 }
 
 export interface TaskSpec {

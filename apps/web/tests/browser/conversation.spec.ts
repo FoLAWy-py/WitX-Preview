@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
@@ -41,7 +41,7 @@ test("a finished task can be deleted after a confirmation, and old screenshots s
   await mockApi(page, []);
   const deleted: string[] = [];
   // Registered last, so these win: a finished task whose screenshot has expired.
-  await page.route("**/api/v1/tasks/t1", async (route) => {
+  await page.route(detailOf("t1"), async (route) => {
     if (route.request().method() === "DELETE") {
       const headers = await route.request().allHeaders();
       deleted.push(headers["x-csrf-token"]);
@@ -89,9 +89,7 @@ test("a question from the agent is answered in its card", async ({ page }) => {
     runs: [{ ...task.runs[0], wait_reason: "user_input" }],
   };
   const sent: unknown[] = [];
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: asking }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: asking }));
   await page.route("**/api/v1/tasks/t1/events*", (route) =>
     route.fulfill({
       contentType: "text/event-stream",
@@ -137,9 +135,7 @@ test("a question's options are one per line, the recommended one first, each ans
     runs: [{ ...task.runs[0], wait_reason: "user_input" }],
   };
   const sent: unknown[] = [];
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: asking }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: asking }));
   await page.route("**/api/v1/tasks/t1/events*", (route) =>
     route.fulfill({
       contentType: "text/event-stream",
@@ -186,7 +182,7 @@ test("a plan the agent presents is approved with a button, or answered from the 
     runs: [{ ...task.runs[0], wait_reason: "user_input", wait_detail: "plan" }],
   };
   const sent: unknown[] = [];
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: planning }),
   );
   await page.route("**/api/v1/tasks/t1/events*", (route) =>
@@ -290,7 +286,7 @@ test("the person chooses where to buy from the agent's options", async ({
     summary: "1 bag, 2 kg",
     observation_id: null,
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({
       json: {
         ...task,
@@ -357,9 +353,7 @@ test("a result is the agent's own words, as a message, with the screenshots it r
     observations: shots.map((id) => ({ ...task.observations[0], id })),
     result,
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: done }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: done }));
   await page.goto("/sign-in");
   await page.getByLabel("Developer token").fill("dev-token");
   await page.getByRole("button", { name: "Sign in with token" }).click();
@@ -372,6 +366,41 @@ test("a result is the agent's own words, as a message, with the screenshots it r
   await expect(open).toHaveCount(3);
   await page.getByRole("button", { name: "+2 more" }).click();
   await expect(open).toHaveCount(5);
+});
+
+test("a result the agent offers to keep as a skill has a button that asks for one", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  const result = {
+    summary: "The page title is Example Domain.",
+    evidence_observation_ids: [],
+    completed_at: "2026-10-10T10:05:00Z",
+    offer_skill: true,
+  };
+  const done = {
+    ...task,
+    status: "completed",
+    actions: [],
+    runs: [{ ...task.runs[0], status: "completed", wait_reason: null, result }],
+    result,
+  };
+  const sent: unknown[] = [];
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: done }));
+  await page.route("**/api/v1/tasks/t1/inputs", (route) => {
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ json: done });
+  });
+  await page.goto("/sign-in");
+  await page.getByLabel("Developer token").fill("dev-token");
+  await page.getByRole("button", { name: "Sign in with token" }).click();
+  await openTask(page);
+
+  await expect(
+    page.getByText("The page title is Example Domain."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Keep as a skill" }).click();
+  await expect.poll(() => sent).toEqual([{ text: "/skill" }]);
 });
 
 test("a failed task says why at the end of the conversation", async ({
@@ -404,9 +433,7 @@ test("a failed task says why at the end of the conversation", async ({
     runs: [{ ...task.runs[0], status: "failed", wait_reason: null, result }],
     result,
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: failed }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: failed }));
   await page.goto("/sign-in");
   await page.getByLabel("Developer token").fill("dev-token");
   await page.getByRole("button", { name: "Sign in with token" }).click();
@@ -453,9 +480,7 @@ test("each finished round keeps its result in the conversation after the task go
       },
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: going }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: going }));
   await page.goto("/sign-in");
   await page.getByLabel("Developer token").fill("dev-token");
   await page.getByRole("button", { name: "Sign in with token" }).click();
@@ -475,7 +500,7 @@ test("the agent's words show as a message in the making while the model produces
     observations: [],
     runs: [{ ...task.runs[0], status: "running", wait_reason: null }],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: speaking }),
   );
   const frame = (text: string) =>
@@ -508,7 +533,7 @@ test("the status line says what the step is at, and a refused completion stays f
     observations: [],
     runs: [{ ...task.runs[0], status: "running", wait_reason: null }],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: speaking }),
   );
   const frame = (text: string, phase: string) =>

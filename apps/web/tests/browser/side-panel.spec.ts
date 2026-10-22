@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
@@ -115,9 +115,7 @@ test("a task without phones starts with an empty side panel; a closed side chat 
     actions: [],
     observations: [],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: plain }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: plain }));
   await page.route("**/api/v1/tasks/t1/side-chat", (route) =>
     route.fulfill({
       json: [
@@ -216,7 +214,7 @@ test("the goal tab shows the agent's plan and what it wrote down", async ({
   await page.route("**/api/v1/tasks/t1/side-chat", (route) =>
     route.fulfill({ json: [] }),
   );
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({
       json: {
         ...task,

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,12 +29,20 @@ import { follow } from "@/lib/follow";
 import { cn } from "@/lib/format";
 import { useLayout } from "@/lib/prefs";
 import { PANEL_MIN, usePanelWidth } from "@/lib/panelWidth";
-import { buildTimeline } from "@/lib/timeline";
-import { useAsync } from "@/lib/useAsync";
+import {
+  applyChanges,
+  applyEarlier,
+  heldOpen,
+  mergeEvents,
+  OPEN_HELD_MAX,
+} from "@/lib/changes";
+import { useNearEnd } from "@/lib/reach";
+import { buildTimeline, inPart, SHOWN_EVENTS } from "@/lib/timeline";
 import { usePageTitle } from "@/lib/title";
 import { useWorkspace } from "@/lib/workspace";
 import { TaskComposer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
+import { loadMarkdown } from "@/components/Rich";
 import { GoalBar } from "@/components/GoalTab";
 import { useSideChats } from "@/components/SideChatTab";
 import { SidePanel, usePanelTabs, type PanelTab } from "@/components/SidePanel";
@@ -55,40 +64,57 @@ import { waitsForPhone } from "@/lib/agents";
 /** How long the stream may be down before the page says it may be out of date. */
 const OFFLINE_NOTICE_MS = 3_000;
 
-/**
- * Follows the task's event stream and refreshes the task after each burst of events,
- * and after every reconnect: changes made while disconnected (an approval expiring,
- * say) are not all events, so the whole task is fetched again.
- */
 /** How long the agent's live words stay once its step is over: the message kept for
  * them arrives with the task fetched after the step's events, a moment later. */
 const SAID_MS = 2000;
 
-function useEvents(taskId: string, refresh: () => Promise<void>) {
+interface Live {
+  /** The events the conversation shows, of one read of the stream. */
+  onEvents: (events: EventView[]) => void;
+  /** Something changed: a burst of events is over (`whole`: after a reconnect, when
+   * some changes made meanwhile, an approval expiring say, are no events). */
+  onChange: (whole: boolean) => void;
+}
+
+/**
+ * Follows the task's event stream from `after` (where the task as loaded ends): passes
+ * on the events the conversation shows, and says when something changed.
+ */
+function useEvents(taskId: string, after: number | undefined, live: Live) {
   const { api } = useAuth();
-  const [events, setEvents] = useState<EventView[]>([]);
   const [saying, setSaying] = useState<SayingView | null>(null);
   const [connected, setConnected] = useState(true);
-  const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const from = useRef(after);
+  from.current ??= after;
+  const started = after !== undefined;
 
   useEffect(() => {
+    if (!started) return;
     let burst: ReturnType<typeof setTimeout> | undefined;
     let said: ReturnType<typeof setTimeout> | undefined;
     let offline: ReturnType<typeof setTimeout> | undefined;
-    setEvents([]);
+    // Events of one read are passed on together: one copy of the list, not one each.
+    let arriving: EventView[] = [];
+    const pass = () => {
+      const fresh = arriving;
+      arriving = [];
+      liveRef.current.onEvents(fresh);
+    };
     setSaying(null);
     setConnected(true);
     const stop = follow(
-      (after, handlers, signal) => api.events(taskId, after, handlers, signal),
+      (cursor, handlers, signal) =>
+        api.events(taskId, cursor, handlers, signal, [...SHOWN_EVENTS]),
       {
         onEvent: (event) => {
-          // An event seen before (a resent stream) is not shown twice.
-          setEvents((list) =>
-            list.some((e) => e.seq === event.seq) ? list : [...list, event],
-          );
+          if (SHOWN_EVENTS.has(event.type)) {
+            if (!arriving.length) queueMicrotask(pass);
+            arriving.push(event);
+          }
           clearTimeout(burst);
-          burst = setTimeout(() => void refreshRef.current(), 150);
+          burst = setTimeout(() => liveRef.current.onChange(false), 150);
         },
         // What the agent says and is at right now. No words and no phase says
         // the step is over: its words stay a moment, until the message kept for them
@@ -105,9 +131,11 @@ function useEvents(taskId: string, refresh: () => Promise<void>) {
             return;
           }
           setConnected(true);
-          if (reconnected) void refreshRef.current();
+          if (reconnected) liveRef.current.onChange(true);
         },
       },
+      undefined,
+      from.current,
     );
     return () => {
       stop();
@@ -115,17 +143,165 @@ function useEvents(taskId: string, refresh: () => Promise<void>) {
       clearTimeout(said);
       clearTimeout(offline);
     };
-  }, [api, taskId]);
+  }, [api, taskId, started]);
 
-  return { events, connected, saying };
+  return { connected, saying };
 }
+
+/**
+ * The task as its page shows it, with the events of its conversation. A long task
+ * comes in parts: the latest when the page opens, the one before each time
+ * `earlier()` asks. It is fetched whole (as far back as the page holds) after a
+ * reconnect and when the page is seen again (`load(true)`), and otherwise brought up
+ * to date with what changed after the last event it holds (`load(false)`), so a step
+ * costs what it changed. Loads run one after another; one not started yet covers
+ * those asked for meanwhile, and a whole one covers changes.
+ */
+function useTask(taskId: string) {
+  const { api } = useAuth();
+  const [state, setState] = useState<{
+    taskId: string;
+    task?: TaskDetail;
+    events: EventView[];
+    error?: Error;
+  }>();
+  // The task the page shows now, and the last one loaded for it, for the loads queued.
+  const shownId = useRef(taskId);
+  shownId.current = taskId;
+  const held = useRef<{ taskId: string; task: TaskDetail }>(undefined);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const waiting = useRef<{
+    taskId: string;
+    whole: boolean;
+    done: Promise<void>;
+  }>(undefined);
+
+  const enqueue = useCallback(<T,>(job: () => Promise<T>): Promise<T> => {
+    const done = queue.current.then(job);
+    queue.current = done.catch(() => {});
+    return done;
+  }, []);
+
+  const keep = useCallback(
+    (forTask: string, task: TaskDetail | undefined, events: EventView[]) => {
+      if (shownId.current !== forTask) return;
+      if (task) held.current = { taskId: forTask, task };
+      setState((was) => {
+        const same = was?.taskId === forTask;
+        return {
+          taskId: forTask,
+          task: task ?? (same ? was.task : undefined),
+          events: mergeEvents(same ? was.events : [], events),
+        };
+      });
+    },
+    [],
+  );
+
+  const load = useCallback(
+    (whole: boolean) => {
+      const pending = waiting.current;
+      if (pending?.taskId === taskId) {
+        pending.whole ||= whole;
+        return pending.done;
+      }
+      const job = { taskId, whole, done: Promise.resolve() };
+      job.done = enqueue(async () => {
+        if (waiting.current === job) waiting.current = undefined;
+        const mine =
+          held.current?.taskId === taskId ? held.current.task : undefined;
+        const open = mine ? heldOpen(mine) : [];
+        try {
+          if (job.whole || !mine || open.length > OPEN_HELD_MAX) {
+            // As far back as the page holds: the part it was scrolled to stays.
+            const from = mine
+              ? (mine.earlier?.before ?? mine.created_at)
+              : undefined;
+            const task = await api.task(taskId, { from, types: SHOWN_EVENTS });
+            keep(taskId, task, task.events ?? []);
+          } else {
+            const changes = await api.taskChanges(
+              taskId,
+              mine.last_event_seq,
+              open,
+            );
+            keep(taskId, applyChanges(mine, changes), []);
+          }
+        } catch (err) {
+          if (shownId.current !== taskId) return;
+          setState((was) => ({
+            ...(was?.taskId === taskId ? was : { taskId, events: [] }),
+            error: err as Error,
+          }));
+        }
+      });
+      waiting.current = job;
+      return job.done;
+    },
+    [api, taskId, enqueue, keep],
+  );
+
+  /** Loads the part before what the page holds; false if it could not. */
+  const earlier = useCallback(
+    () =>
+      enqueue(async () => {
+        const mine =
+          held.current?.taskId === taskId ? held.current.task : undefined;
+        if (!mine?.earlier) return true;
+        try {
+          const part = await api.taskEarlier(
+            taskId,
+            mine.earlier.before,
+            SHOWN_EVENTS,
+          );
+          keep(taskId, applyEarlier(mine, part), part.events);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    [api, taskId, enqueue, keep],
+  );
+
+  useEffect(() => {
+    held.current = undefined;
+    void load(true);
+    const seen = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    document.addEventListener("visibilitychange", seen);
+    return () => document.removeEventListener("visibilitychange", seen);
+  }, [load]);
+
+  const mine = state?.taskId === taskId ? state : undefined;
+  const live = useCallback(
+    (events: EventView[]) => keep(taskId, undefined, events),
+    [keep, taskId],
+  );
+  return {
+    data: mine?.task,
+    events: mine?.events ?? NO_EVENTS,
+    error: mine?.error,
+    load,
+    earlier,
+    live,
+  };
+}
+
+const NO_EVENTS: EventView[] = [];
 
 export default function Task() {
   const { taskId = "" } = useParams();
-  const { api } = useAuth();
   const { t } = useI18n();
-  const task = useAsync(() => api.task(taskId), [api, taskId]);
-  const { events, connected, saying } = useEvents(taskId, task.reload);
+  const task = useTask(taskId);
+  const { load, earlier, live } = task;
+  const reload = useCallback(() => load(false), [load]);
+  const { connected, saying } = useEvents(taskId, task.data?.last_event_seq, {
+    onEvents: live,
+    onChange: (whole) => void load(whole),
+  });
+  // The agent's text arrives with the task: load its formatter alongside, not after.
+  useEffect(() => void loadMarkdown().catch(() => {}), []);
 
   if (task.error) {
     const missing = task.error instanceof ApiError && task.error.status === 404;
@@ -138,7 +314,7 @@ export default function Task() {
           ) : (
             <ErrorState
               message={t("detail.error")}
-              onRetry={() => void task.reload()}
+              onRetry={() => void load(true)}
             />
           )}
         </div>
@@ -157,10 +333,11 @@ export default function Task() {
     <TaskView
       key={task.data.id}
       task={task.data}
-      events={events}
+      events={task.events}
       saying={saying}
       connected={connected}
-      reload={task.reload}
+      reload={reload}
+      loadEarlier={earlier}
     />
   );
 }
@@ -171,12 +348,15 @@ function TaskView({
   saying,
   connected,
   reload,
+  loadEarlier,
 }: {
   task: TaskDetail;
   events: EventView[];
   saying: SayingView | null;
   connected: boolean;
   reload: () => Promise<void>;
+  /** Loads the part of the task before the one shown; false if it could not. */
+  loadEarlier: () => Promise<boolean>;
 }) {
   usePageTitle(task.title ?? task.request);
   const { t } = useI18n();
@@ -185,7 +365,10 @@ function TaskView({
   const { devices, refresh } = useWorkspace();
   const navigate = useNavigate();
   const all = devices.data ?? [];
-  const items = useMemo(() => buildTimeline(task, events), [task, events]);
+  const items = useMemo(
+    () => inPart(buildTimeline(task, events), task.earlier?.before),
+    [task, events],
+  );
   const finished = ["stopped", "completed", "failed"].includes(task.status);
   const [error, setError] = useState<string>();
   const [confirm, setConfirm] = useState<"stop" | "delete">();
@@ -216,6 +399,36 @@ function TaskView({
     [watchEdges],
   );
   const nearBottom = useRef(true);
+
+  // The part before, loaded as the top of the conversation nears view.
+  const [early, setEarly] = useState<"idle" | "loading" | "failed">("idle");
+  const showEarlier = useCallback(() => {
+    if (early === "loading") return;
+    setEarly("loading");
+    void loadEarlier().then((ok) => setEarly(ok ? "idle" : "failed"));
+  }, [early, loadEarlier]);
+  // Watched once the page has moved to the newest message (its first scroll), or at
+  // once when there is nothing to scroll: not in the moment it opens at the top.
+  const [settled, setSettled] = useState(false);
+  const earlierMarker = useNearEnd(
+    showEarlier,
+    !!task.earlier && early === "idle" && settled,
+    items.length,
+    "top",
+  );
+  // What was in view stays there as the part before is put above it.
+  const height = useRef(0);
+  const shownFrom = useRef(task.earlier?.before);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (shownFrom.current !== task.earlier?.before) {
+      shownFrom.current = task.earlier?.before;
+      el.scrollTop += el.scrollHeight - height.current;
+    }
+    height.current = el.scrollHeight;
+    if (el.scrollHeight <= el.clientHeight) setSettled(true);
+  });
 
   const changed = async () => {
     await reload();
@@ -411,6 +624,7 @@ function TaskView({
               const el = e.currentTarget;
               nearBottom.current =
                 el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+              setSettled(true);
             }}
             className="scroll-quiet min-h-0 flex-1 overflow-y-auto"
           >
@@ -425,6 +639,22 @@ function TaskView({
                 </p>
               )}
               {error && <ErrorState message={error} />}
+              {task.earlier &&
+                (early === "failed" ? (
+                  <Button variant="ghost" onClick={showEarlier}>
+                    {t("conversation.earlier")}
+                  </Button>
+                ) : (
+                  <div ref={earlierMarker} className="py-1">
+                    {early === "loading" && (
+                      <div
+                        role="status"
+                        aria-label={t("common.loading")}
+                        className="skeleton h-4 w-2/5 rounded"
+                      />
+                    )}
+                  </div>
+                ))}
               <Conversation
                 task={task}
                 items={items}

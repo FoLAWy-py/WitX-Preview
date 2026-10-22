@@ -47,9 +47,11 @@ export function follow(
   open: OpenStream,
   handlers: FollowHandlers,
   whenBack: OnReturn = onReturn,
+  /** The last event already had: the stream starts after it. */
+  start = 0,
 ): () => void {
   let stopped = false;
-  let cursor = 0;
+  let cursor = start;
   let failures = 0;
   let everOpen = false;
   let lastActivity = 0;

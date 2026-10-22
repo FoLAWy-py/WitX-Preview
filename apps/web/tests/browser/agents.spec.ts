@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
@@ -25,9 +25,7 @@ test("a sub-agent is named in the conversation and opens in a tab of its own", a
       child,
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: working }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: working }));
   await page.route("**/api/v1/tasks/t1/events*", (route) =>
     route.fulfill({
       contentType: "text/event-stream",
@@ -79,9 +77,7 @@ test("sub-agents' questions are answered one at a time, each to the agent that a
     ],
   };
   const sent: Record<string, unknown>[] = [];
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: asking }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: asking }));
   await page.route("**/api/v1/tasks/t1/inputs", (route) => {
     sent.push(route.request().postDataJSON());
     return route.fulfill({ json: asking });

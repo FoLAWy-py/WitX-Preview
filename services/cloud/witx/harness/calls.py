@@ -453,11 +453,15 @@ async def _complete(turn: Turn, call: ToolCall) -> dict[str, Any] | None:
             )
         return None
     await runs.resolve_call(conn, call.id, {"status": "accepted"})
-    return {
+    result: dict[str, Any] = {
         "summary": rules.shown_text(str(call.arguments.get("summary", "")))[:4000],
         "evidence_observation_ids": [str(i) for i in evidence_ids],
         "completed_at": utcnow().isoformat(),
     }
+    # The person keeps a skill from the main agent's result, not a sub-agent's.
+    if call.arguments.get("offer_skill") is True and run.parent_run_id is None:
+        result["offer_skill"] = True
+    return result
 
 
 HANDLERS: dict[str, Handler] = {

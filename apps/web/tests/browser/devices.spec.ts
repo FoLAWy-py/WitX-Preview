@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask } from "./fixtures/auth";
 import { SCREEN_JPEG } from "./fixtures/media";
 import { task } from "./fixtures/task";
@@ -13,9 +13,7 @@ test("the device panel says it is connecting until the first live picture, then 
     runs: [{ ...task.runs[0], status: "running", wait_reason: null }],
     actions: [],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: running }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: running }));
   let answer: () => void = () => {};
   const ready = new Promise<void>((resolve) => (answer = resolve));
   await page.route("**/api/v1/tasks/t1/devices/d1/live", async (route) => {
@@ -70,9 +68,7 @@ test("a phone that stops answering says why on the task page, which waits for it
     ],
     actions: [],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: waiting }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: waiting }));
   await page.goto("/sign-in");
   await page.getByLabel("Developer token").fill("dev-token");
   await page.getByRole("button", { name: "Sign in with token" }).click();
@@ -123,9 +119,7 @@ test("a phone that does not respond is not watched: the panel says why and when 
     ],
     actions: [],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: waiting }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: waiting }));
   let asked = 0;
   await page.route("**/api/v1/tasks/t1/devices/d1/live", (route) => {
     asked += 1;
@@ -188,9 +182,7 @@ test("a locked phone is not watched and says it is locked, but can still be take
     route.fulfill({ json: [locked] }),
   );
   const paused = { ...task, status: "paused", actions: [] };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: paused }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: paused }));
   let asked = 0;
   await page.route("**/api/v1/tasks/t1/devices/d1/live", (route) => {
     asked += 1;
@@ -217,9 +209,7 @@ test("a live picture that stops coming says so and is asked for less often until
     runs: [{ ...task.runs[0], status: "running", wait_reason: null }],
     actions: [],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: running }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: running }));
   const asks: number[] = [];
   let answers = false;
   await page.route("**/api/v1/tasks/t1/devices/d1/live", (route) => {

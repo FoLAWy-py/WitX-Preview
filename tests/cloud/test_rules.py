@@ -587,3 +587,31 @@ def test_a_question_or_a_reply_without_tools_waits_for_the_user_in_the_agent_s_w
 
 def test_a_turn_whose_tool_calls_all_resolved_goes_on() -> None:
     assert turn_end() == rules.TurnEnd(RunStatus.RUNNABLE)
+
+
+def _at(minute: int) -> datetime:
+    return datetime(2026, 10, 22, 8, 0, tzinfo=UTC) + timedelta(minutes=minute)
+
+
+def test_a_task_s_latest_part_goes_back_whole_rounds_until_it_holds_enough_actions() -> None:
+    rounds = [_at(0), _at(10), _at(20), _at(30)]
+    # 150 actions in the round at 20, 100 in the round at 30: two rounds hold 250.
+    actions = [_at(20)] * 150 + [_at(30)] * 100
+
+    assert rules.part_start(rounds, actions) == _at(20)
+    # The part before it: the two earlier rounds hold nothing, so it reaches the start.
+    assert rules.part_start(rounds, actions, before=_at(20)) is None
+
+
+def test_a_part_holds_at_least_one_round_however_many_actions_it_has() -> None:
+    rounds = [_at(0), _at(10)]
+    assert rules.part_start(rounds, [_at(10)] * 900) == _at(10)
+
+
+def test_a_part_of_many_small_rounds_stops_at_twenty_rounds() -> None:
+    rounds = [_at(n) for n in range(30)]
+    assert rules.part_start(rounds, [_at(n) for n in range(30)]) == _at(10)
+
+
+def test_a_short_task_is_one_part() -> None:
+    assert rules.part_start([_at(0), _at(5)], [_at(1), _at(6)]) is None

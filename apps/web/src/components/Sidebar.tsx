@@ -37,6 +37,7 @@ import { useTheme } from "@/lib/prefs";
 import { Button, Field, Ico, PlatformIcon, inputClass } from "./ui/base";
 import { Dialog } from "./ui/dialog";
 import { Menu, type MenuEntry } from "./ui/popover";
+import { useNearEnd } from "@/lib/reach";
 import { useTaskList, useWorkspace } from "@/lib/workspace";
 import { readyFirst, unavailable } from "@/lib/pool";
 import { scheduleNotice, scheduleState } from "@/lib/schedules";
@@ -231,20 +232,28 @@ function TaskRow({
   );
 }
 
-/** A list of tasks that loads more on request. */
+/** A list of tasks that loads more on request, or, the last list in the sidebar
+ * (`endless`), as it is scrolled to its end. */
 function TaskList({
   filter,
   pageSize,
   empty,
   actions,
+  endless = false,
 }: {
   filter: { group?: string; q?: string; pinned?: "only" | "without" };
   pageSize: number;
   empty: string;
   actions: TaskActions;
+  endless?: boolean;
 }) {
   const { t } = useI18n();
   const list = useTaskList(filter, pageSize);
+  const marker = useNearEnd(
+    list.showMore,
+    endless && list.more && !list.moreFailed,
+    list.data?.length ?? 0,
+  );
   if (!list.data)
     return list.error ? (
       <p className="px-2.5 py-2 text-[13px] text-red">
@@ -268,15 +277,26 @@ function TaskList({
           <TaskRow key={task.id} task={task} actions={actions} />
         ))}
       </ul>
-      {list.more && (
-        <ListToggle
-          expanded={false}
-          onClick={list.showMore}
-          disabled={list.loading}
-        >
-          {list.loading ? t("common.loading") : t("sidebar.showMore")}
-        </ListToggle>
-      )}
+      {list.more &&
+        (endless && !list.moreFailed ? (
+          <div ref={marker} className="px-2.5 py-1.5">
+            {list.loadingMore && (
+              <div
+                role="status"
+                aria-label={t("common.loading")}
+                className="skeleton h-4 w-3/5 rounded"
+              />
+            )}
+          </div>
+        ) : (
+          <ListToggle
+            expanded={false}
+            onClick={list.showMore}
+            disabled={list.loadingMore}
+          >
+            {list.loadingMore ? t("common.loading") : t("sidebar.showMore")}
+          </ListToggle>
+        ))}
     </>
   );
 }
@@ -648,6 +668,7 @@ export function Sidebar({
                 pageSize={TASK_PAGE}
                 empty={t("sidebar.noMatch")}
                 actions={actions}
+                endless
               />
             </Section>
           ) : (
@@ -756,6 +777,7 @@ export function Sidebar({
                   pageSize={TASK_PAGE}
                   empty={t("sidebar.noTasks")}
                   actions={actions}
+                  endless
                 />
               </Section>
             </>
@@ -936,6 +958,7 @@ export function AccountMenu({ collapsed }: { collapsed?: boolean }) {
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label={t("account.menu")}
+          data-prefetch="/settings"
           onClick={toggle}
           onKeyDown={onKeyDown}
           className={cn(

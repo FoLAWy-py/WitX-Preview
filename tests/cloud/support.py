@@ -62,9 +62,9 @@ def device_info(i: int) -> dict[str, Any]:
     }
 
 
-def png(width: int, height: int) -> bytes:
+def png(width: int, height: int, shade: int = 0x80) -> bytes:
     """A valid grey PNG of the given size."""
-    raw = b"".join(b"\x00" + b"\x80" * width for _ in range(height))
+    raw = b"".join(b"\x00" + bytes([shade]) * width for _ in range(height))
 
     def chunk(kind: bytes, data: bytes) -> bytes:
         return (

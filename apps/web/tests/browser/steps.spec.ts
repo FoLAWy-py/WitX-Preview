@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask, signIn } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
@@ -36,7 +36,7 @@ test("a finished round is one line with no count or time; its steps show only wh
       step("a2", "Sounds", "2026-10-10T10:01:00Z", "2026-10-10T10:02:10Z"),
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   await page.goto("/sign-in");
@@ -89,7 +89,7 @@ test("a step's screenshot shows only when the step is unfolded; opening or searc
     ],
     observations: [...task.observations, shot("o3"), shot("o4"), shot("o5")],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   await signIn(page);
@@ -128,7 +128,7 @@ test("a step under way or waiting for you says so nowhere in its line; one that 
       },
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   await signIn(page);
@@ -155,7 +155,7 @@ test("a single step is folded like any other; unfolded, its effect says what it 
     runs: [{ ...task.runs[0], status: "completed", wait_reason: null }],
     actions: [plant],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   await signIn(page);
@@ -186,7 +186,7 @@ test("an effect the agent did not describe is named by its kind", async ({
       },
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   await signIn(page);
@@ -208,9 +208,7 @@ test("while steps run, the round's line says what the agent does now, with no co
       step("a2", "Sounds", "2026-10-10T10:01:00Z", null),
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: running }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: running }));
   await page.goto("/sign-in");
   await page.getByLabel("Developer token").fill("dev-token");
   await page.getByRole("button", { name: "Sign in with token" }).click();
@@ -268,7 +266,7 @@ test("a long press, a double tap and a held swipe are named in the steps and mar
       ),
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   await page.goto("/sign-in");
@@ -298,9 +296,7 @@ test("what the agent did along the way is a line of its round, and the round's l
       step("a1", "Settings", "2026-10-10T10:00:05Z", "2026-10-10T10:00:07Z"),
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: running }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: running }));
   const event = (seq: number, type: string, data: object) =>
     `data: ${JSON.stringify({ seq, type, data, created_at: "2026-10-10T10:00:09Z" })}\n\n`;
   await page.route("**/api/v1/tasks/t1/events*", (route) =>
@@ -357,7 +353,7 @@ test("a round's screenshots open as one gallery that fits the window and moves w
       shot("o5", "2026-10-10T10:01:03Z"),
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   await signIn(page);

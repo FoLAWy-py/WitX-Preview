@@ -36,7 +36,7 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # Chinese punctuation is text the phones show and the keyboard types, not a typo.
-allowed-confusables = ["，", "：", "！", "（", "）", "；"]
+allowed-confusables = ["，", "：", "！", "？", "（", "）", "；"]
 
 [tool.mypy]
 python_version = "3.12"

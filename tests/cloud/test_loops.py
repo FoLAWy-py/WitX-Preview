@@ -10,7 +10,7 @@ from witx.domain.model import RunStatus, WaitReason
 from witx.store.db import Database
 
 from tests.cloud.rig import Rig
-from tests.cloud.support import device_info, provision
+from tests.cloud.support import call, device_info, provision
 from tests.cloud.test_flow import complete, tap
 
 
@@ -76,3 +76,42 @@ async def test_an_agent_going_in_circles_is_warned_then_stopped_for_the_user(rig
         "repeating",
     )
     assert "run.repeating" in await rig.event_types(task.id)
+
+
+# ---------------------------------------------------------------- an unchanged screen
+
+
+def test_tapping_the_same_place_again_on_an_unchanged_screen_is_refused() -> None:
+    # #313's baseline: a Dark theme switch showed off 1.7 s after the tap; a second tap
+    # turned it back.
+    with pytest.raises(rules.Rejected) as refused:
+        rules.check_changed(t(669, 951), t(664, 950), before="same", after="same")
+    assert refused.value.code == "unchanged_screen"
+
+
+def test_tapping_again_after_the_screen_changed_goes_ahead() -> None:
+    rules.check_changed(t(669, 951), t(664, 950), before="off", after="on")
+
+
+def test_tapping_somewhere_else_on_an_unchanged_screen_goes_ahead() -> None:
+    rules.check_changed(t(200, 951), t(664, 950), before="same", after="same")
+
+
+async def test_after_a_refused_tap_on_an_unchanged_screen_observing_lets_the_tap_go_ahead(
+    rig: Rig,
+) -> None:
+    device = rig.tenant.device_ids[0]
+    rig.gateway.same_picture = True
+    rig.model.script = [
+        lambda r: tap(r, device),
+        lambda r: tap(r, device),
+        [call("observe", device_id=device)],
+        lambda r: tap(r, device),
+        complete,
+    ]
+    task = await rig.create_task()
+    await rig.settle()
+
+    outputs = [o for o in await rig.outputs(task.id) if o["name"] == "tap"]
+    assert outputs[1]["status"] == "rejected" and outputs[1]["code"] == "unchanged_screen"
+    assert len(await rig.actions(task.id)) == 2

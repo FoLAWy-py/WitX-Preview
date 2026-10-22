@@ -25,7 +25,7 @@ import { lineDiff } from "@/lib/diff";
 import { cn } from "@/lib/format";
 import type { SkillDraft } from "@/lib/timeline";
 import { useAsync } from "@/lib/useAsync";
-import Markdown from "@/components/Markdown";
+import { Rich } from "@/components/Rich";
 import {
   Button,
   Card,
@@ -399,7 +399,7 @@ export function Skills({
                 </div>
               )}
               <div className="mt-3 rounded-lg border border-line p-3 text-[13.5px]">
-                <Markdown text={reading.body} />
+                <Rich text={reading.body} />
               </div>
             </Card>
           ) : (
@@ -512,7 +512,7 @@ export function SkillDraftCard({
         </div>
       )}
       <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-line p-3 text-[13.5px]">
-        <Markdown text={draft.body} />
+        <Rich text={draft.body} />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
         {done ? (

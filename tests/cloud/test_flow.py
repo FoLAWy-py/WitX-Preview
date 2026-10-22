@@ -317,6 +317,19 @@ async def test_each_finished_round_keeps_its_result_after_the_task_goes_on(rig: 
     assert len([r for r in done.runs if r.result]) == 2 and done.result is not None
 
 
+async def test_the_agent_offers_to_keep_a_task_as_a_skill_with_its_result(rig: Rig) -> None:
+    offered = call(
+        "complete_task", summary="about ¥20", evidence_observation_ids=[], offer_skill=True
+    )
+    rig.model.script = [[offered]]
+    task = await rig.create_task("How much is a coffee?", device_ids=[])
+    await rig.settle()
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        detail = await views.task_detail(conn, await rig.task(task.id))
+    assert detail.status == "completed"  # it finished: no question waits for the person
+    assert detail.result is not None and detail.result.offer_skill
+
+
 async def test_a_task_that_reached_the_step_limit_shows_why_it_failed(
     db: Database, admin_db: Database, tmp_path: Path
 ) -> None:

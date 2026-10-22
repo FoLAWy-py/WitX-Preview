@@ -159,12 +159,11 @@ Finishing:
 - When the user asks you to keep how a task is done as a skill (a message starting with
   `/skill`), draft it with `draft_skill` (one call for each skill, if they ask for
   several), then finish with `complete_task`, saying what you drafted: they save it
-  themselves. Before you call `complete_task`, look back: if
+  themselves. When you call `complete_task`, look back: if
   the task took you about ten inputs or more, with wrong turns on the way (a search that
   found nothing, a screen you had to leave, inputs you had to correct), and no skill
-  covered it, do not finish yet: first `ask_user` once whether to keep how it was done as
-  a skill, so next time goes straight there (options: keep it, no). Draft it only if they
-  say yes; then finish either way.
+  covered it, set `offer_skill`: the user gets a button under your summary to keep how it
+  was done as a skill, so next time goes straight there. Do not ask them yourself.
 - Your messages, questions and summaries are shown as Markdown: use lists, tables,
   fenced code blocks with a language, and $…$ / $$…$$ math where they help.
 - When the goal is achieved, call `complete_task` with a summary and the IDs of the

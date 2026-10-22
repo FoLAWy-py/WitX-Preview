@@ -206,6 +206,16 @@ async def admit(
             "repeating",
             f"you repeated the same inputs {rules.LOOP_ASK} times without reaching the goal",
         )
+    last = next((a for a in reversed(actions) if a.device_id == device_id), None)
+    if last is not None and last.post_observation_id == observation.id:
+        before = (
+            await execution.get_observation(conn, last.observation_id)
+            if last.observation_id
+            else None
+        )
+        rules.check_changed(
+            payload, last.input, before.sha256 if before else None, observation.sha256
+        )
     effects_seen = set(declared) | set(risk.effects if risk else [])
     terms, notes = rules.check_intent(
         effects=effects_seen,

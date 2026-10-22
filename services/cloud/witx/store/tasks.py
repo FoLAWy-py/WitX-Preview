@@ -1,7 +1,7 @@
 """Tasks, user inputs and the per-task event stream."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -113,15 +113,18 @@ async def list_with_attention(
     task_id: UUID | None = None,
     search: str | None = None,
     pins: tuple[UUID, str] | None = None,
-) -> list[tuple[Task, bool]]:
+    after: tuple[datetime, UUID] | None = None,
+) -> list[tuple[Task, bool, datetime]]:
     """Recent tasks, each flagged if it waits for the user (approval, answer, unknown
-    effect). ``group`` keeps one group's tasks, or the ungrouped ones (UNGROUPED);
-    ``task_id`` just that task; ``search`` those whose goal contains the text;
-    ``pins``, a person and PINNED_ONLY or PINNED_WITHOUT, only the tasks they pinned
-    (latest pinned first) or none of them."""
+    effect) and with the time it sorts by. ``group`` keeps one group's tasks, or the
+    ungrouped ones (UNGROUPED); ``task_id`` just that task; ``search`` those whose goal
+    contains the text; ``pins``, a person and PINNED_ONLY or PINNED_WITHOUT, only the
+    tasks they pinned (latest pinned first) or none of them. ``after``, a task's
+    sort time and ID, starts the list just past that task: ties are broken by ID, so a
+    page never repeats or skips a task that did not change."""
     where = ["deleted_at IS NULL"]
     params: dict[str, Any] = {"limit": limit}
-    order = "updated_at DESC"
+    key = "updated_at"
     if pins is not None:
         params["pinner"], which = pins
         pinned = (
@@ -129,10 +132,13 @@ async def list_with_attention(
         )
         where.append(pinned if which == PINNED_ONLY else f"NOT {pinned}")
         if which == PINNED_ONLY:
-            order = (
+            key = (
                 "(SELECT pinned_at FROM task_pins p WHERE p.task_id = tasks.id"
-                " AND p.user_id = :pinner) DESC"
+                " AND p.user_id = :pinner)"
             )
+    if after is not None:
+        where.append(f"({key}, id) < (:after_key, :after_id)")
+        params["after_key"], params["after_id"] = after
     if search:
         where.append(
             "(request ILIKE :search ESCAPE '\\' OR goal ILIKE :search ESCAPE '\\'"
@@ -152,12 +158,12 @@ async def list_with_attention(
         where.append(_NEEDS_ATTENTION)
     rows = await fetch(
         conn,
-        f"""SELECT {_TASK}, {_NEEDS_ATTENTION} AS needs_attention
+        f"""SELECT {_TASK}, {_NEEDS_ATTENTION} AS needs_attention, {key} AS sort_key
               FROM tasks WHERE {" AND ".join(where)}
-             ORDER BY {order} LIMIT :limit""",
+             ORDER BY sort_key DESC, id DESC LIMIT :limit""",
         **params,
     )
-    return [(_task(r), bool(r["needs_attention"])) for r in rows]
+    return [(_task(r), bool(r["needs_attention"]), r["sort_key"]) for r in rows]
 
 
 PINNED_ONLY = "only"
@@ -496,6 +502,33 @@ async def goal_ever_set(conn: AsyncConnection, task_id: UUID) -> bool:
         t=task_id,
     )
     return bool(row and row["yes"])
+
+
+async def events_between(
+    conn: AsyncConnection,
+    task_id: UUID,
+    types: Collection[str],
+    start: datetime | None,
+    end: datetime | None,
+    through: int,
+) -> Sequence[RowMapping]:
+    """The task's events of these types, in order, made from ``start`` and before ``end``
+    (either may be open) and numbered up to ``through``."""
+    bounds = ""
+    if start is not None:
+        bounds += " AND created_at >= :start"
+    if end is not None:
+        bounds += " AND created_at < :end"
+    return await fetch(
+        conn,
+        "SELECT seq, type, data, created_at FROM events"
+        f" WHERE task_id = :t AND type = ANY(:types) AND seq <= :through{bounds} ORDER BY seq",
+        t=task_id,
+        types=list(types),
+        start=start,
+        end=end,
+        through=through,
+    )
 
 
 async def last_event_seq(conn: AsyncConnection, task_id: UUID) -> int:

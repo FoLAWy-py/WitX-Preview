@@ -2,6 +2,10 @@ import { type Page } from "@playwright/test";
 import { PNG } from "./media";
 import { task } from "./task";
 
+/** A task's detail, whatever part or events the page asks for in its query. */
+export const detailOf = (id: string) => (url: URL) =>
+  url.pathname === `/api/v1/tasks/${id}`;
+
 export async function mockApi(
   page: Page,
   decisions: unknown[],
@@ -125,4 +129,28 @@ export async function mockApi(
     }
     return route.fulfill({ status: 404, json: { code: "not_found" } });
   });
+  // What changed after an event: here the whole task as the test serves it now, which
+  // the page applies like changes. The task is fetched from the page, so the test's own
+  // routes for it answer.
+  await page.route(
+    (url) => /^\/api\/v1\/tasks\/[^/]+\/changes$/.test(url.pathname),
+    async (route) => {
+      const url = new URL(route.request().url());
+      let detail: unknown;
+      try {
+        detail = await page.evaluate(
+          async (path) => (await fetch(path)).json(),
+          url.pathname.replace(/\/changes$/, ""),
+        );
+      } catch {
+        return; // the test ended while the page was asking
+      }
+      return route.fulfill({
+        json: {
+          ...(detail as object),
+          since: Number(url.searchParams.get("since")),
+        },
+      });
+    },
+  );
 }

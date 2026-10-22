@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { ImageOff } from "lucide-react";
-import { ApiError } from "@/api/client";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/format";
+import { useInReach } from "@/lib/reach";
+import { shots, type Shot } from "@/lib/shots";
 
-/** Loads a private screenshot (the session cookie signs the request) and shows it;
- * with `width`, a small copy of it that wide, for a thumbnail. */
+const NOTHING: Shot = { failed: false, purged: false };
+
+/** A private screenshot (the session cookie signs the request), with `width` a small copy
+ * that wide for a thumbnail. It loads once it scrolls near view and is let go again far
+ * from it; every view of the same picture shares one copy (lib/shots.ts). */
 export function Screenshot({
   observationId,
   alt,
@@ -20,37 +24,27 @@ export function Screenshot({
 }) {
   const { api } = useAuth();
   const { t } = useI18n();
-  const [url, setUrl] = useState<string>();
-  const [failed, setFailed] = useState(false);
-  const [purged, setPurged] = useState(false);
+  const [box, setBox] = useState<Element | null>(null);
+  const inReach = useInReach(box);
+  const [shot, setShot] = useState(NOTHING);
 
   useEffect(() => {
-    const controller = new AbortController();
-    let objectUrl: string | undefined;
-    setUrl(undefined);
-    setFailed(false);
-    setPurged(false);
-    api
-      .screenshot(observationId, controller.signal, width)
-      .then((blob) => {
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      })
-      .catch((error: Error) => {
-        if (error.name === "AbortError") return;
-        if (error instanceof ApiError && error.code === "purged")
-          setPurged(true);
-        setFailed(true);
-      });
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [api, observationId, width]);
+    if (!inReach) {
+      setShot(NOTHING);
+      return;
+    }
+    return shots.watch(
+      `${observationId}@${width ?? "full"}`,
+      (signal) => api.screenshot(observationId, signal, width),
+      setShot,
+    );
+  }, [api, observationId, width, inReach]);
 
+  const { url, failed, purged } = shot;
   if (failed) {
     return (
       <div
+        ref={setBox}
         className={cn(
           "flex flex-col items-center justify-center gap-1.5 bg-[#1c1d21] p-3 text-center text-[12px] text-[#8b8e96]",
           className,
@@ -66,9 +60,13 @@ export function Screenshot({
       </div>
     );
   }
-  if (!url) return <div className={cn("skeleton rounded-none", className)} />;
+  if (!url)
+    return (
+      <div ref={setBox} className={cn("skeleton rounded-none", className)} />
+    );
   return (
     <img
+      ref={setBox}
       src={url}
       alt={alt}
       draggable={false}

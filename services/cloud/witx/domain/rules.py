@@ -8,6 +8,7 @@ import calendar
 import hashlib
 import json
 import re
+from bisect import bisect_left
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -299,33 +300,33 @@ def decide_policy(
 ) -> Policy:
     """Decides whether an input may run now or must wait for the user's approval.
 
-    Three independent signals mark an input sensitive: the effects the model declared,
-    the risk assessor's verdict (a failed assessment counts as sensitive), and
-    deterministic rules (sensitive apps, personal data in typed text). Any one is enough.
-    An input changes data if either the model or the risk assessor says change_data,
-    or if it is sensitive (a failed assessment cannot rule a change out).
+        Three independent signals mark an input sensitive: the effects the model declared,
+        the risk assessor's verdict (a failed assessment counts as sensitive), and
+        deterministic rules (sensitive apps, personal data in typed text). Any one is enough.
+        An input changes data if either the model or the risk assessor says change_data,
+        or if it is sensitive (a failed assessment cannot rule a change out).
 
-    - ``ask``: inputs that change data wait; looking around runs.
-    - ``auto``: payments, deletions, sharing personal data and account changes wait,
-      as do inputs in a sensitive app, typed money or card numbers, and anything the
-      risk check could not assess or called sensitive without naming an effect.
-      Messages and orders paid for in a later step go ahead.
-    - ``full``: only payments wait; a failed assessment cannot rule a payment out.
+        - ``ask``: inputs that change data wait; looking around runs.
+        - ``auto``: payments, deletions, sharing personal data and account changes wait,
+          as do inputs in a sensitive app, typed money or card numbers, and anything the
+          risk check could not assess or called sensitive without naming an effect.
+          Messages and orders paid for in a later step go ahead.
+        - ``full``: only payments wait; a failed assessment cannot rule a payment out.
 
-    A tap, press, swipe, typed text or picker value without a verdict counts as a failed
-    assessment: the policy never assumes an unassessed input is harmless.
+        A tap, press, swipe, typed text or picker value without a verdict counts as a failed
+        assessment: the policy never assumes an unassessed input is harmless.
 
-    The agent finds an app by searching the installed apps (``find_app``) before it
-    opens one: the search only reads, and runs in every mode. In ``ask``,
-    opening a match below the best one (``found_rank`` > 0) waits, so the user confirms
-    that choice; the best match opens, as an app the agent knew does. In ``auto`` and
-    ``full`` the agent opens whichever match it chose: opening an app changes nothing,
-    and every input in it is judged on its own.
+        The agent finds an app by searching the installed apps (``find_app``) before it
+        opens one: the search only reads, and runs in every mode. In ``ask``,
+        opening a match below the best one (``found_rank`` > 0) waits, so the user confirms
+        that choice; the best match opens, as an app the agent knew does. In ``auto`` and
+        ``full`` the agent opens whichever match it chose: opening an app changes nothing
+    , and every input in it is judged on its own.
 
-    An input that answers a system permission prompt: ``ask`` holds every answer,
-    declining included; ``auto`` and ``full`` let a decline run, and let an allow run when it
-    is of a kind in ``GRANTED_PERMISSIONS`` and the narrowest option, which is not sharing
-    data with someone else. Any other allow is judged as before.
+        An input that answers a system permission prompt: ``ask`` holds every answer,
+        declining included; ``auto`` and ``full`` let a decline run, and let an allow run when it
+        is of a kind in ``GRANTED_PERMISSIONS`` and the narrowest option, which is not sharing
+        data with someone else. Any other allow is judged as before.
     """
     if risk is None and kind in ASSESSED_KINDS:
         risk = RiskVerdict(sensitive=True, effects=[], reason="not assessed", failed=True)
@@ -527,6 +528,34 @@ def _same_input(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
     return a.get("app_id") == b.get("app_id")
 
 
+def check_changed(
+    payload: Mapping[str, Any],
+    previous: Mapping[str, Any] | None,
+    before: str | None,
+    after: str | None,
+) -> None:
+    """Refuses an input aimed at the same point as the previous one when the screenshot
+    that input left is the very picture it was made on (``before`` and ``after`` are
+    their SHA-256), and this input is made on that screenshot. Some changes show a second
+    or two late (a switch, a theme): a second tap would undo the first, so the agent
+    observes first and decides on what it sees then."""
+    if previous is None or before is None or before != after:
+        return
+    kind = payload.get("kind")
+    if kind not in POINT_KINDS or previous.get("kind") != kind:
+        return
+    points = [(payload.get(k), previous.get(k)) for k in ("x", "y")]
+    if all(
+        a is not None and b is not None and abs(float(a) - float(b)) <= LOOP_Y_TOLERANCE
+        for a, b in points
+    ):
+        raise Rejected(
+            "unchanged_screen",
+            "the screen has not changed at all since your last input here; some changes "
+            "show a second or two later, and doing it again may undo it: call observe first",
+        )
+
+
 # Turns in a row that only searched the web before the agent must ask the user.
 SEARCH_TURNS = 3
 
@@ -602,7 +631,7 @@ def check_deliverable(
 
 
 def retry_of(previous: Sequence[Action]) -> UUID | None:
-    """The action a new input on a device tries again : the device's latest
+    """The action a new input on a device tries again: the device's latest
     action in the task, if a person confirmed from a later screenshot that it had no
     effect. Only then may the same effect be attempted anew; an unknown one blocks."""
     if previous and previous[-1].effect == Effect.NO_EFFECT and previous[-1].reconciled_by:
@@ -694,7 +723,7 @@ MEMORY_APP_MAX = 30  # notes about one app; given when the agent first sees it
 MEMORY_APPS_MAX = 300  # notes about all apps together
 MEMORY_KINDS = ("user", "feedback", "app")
 _APP_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,199}$")
-# What memory never holds : secrets and one-time permissions.
+# What memory never holds: secrets and one-time permissions.
 _SECRET_WORDS = re.compile(
     r"密码|口令|验证码|校验码|支付密码|(pin|安全|解锁|动态|短信|登录|提取|取件|门禁)码|密钥|"
     r"cvv|cvc|(?<![a-z])pin(?![a-z])|password|passcode|one-time code|otp|"
@@ -1171,6 +1200,34 @@ def parse_enrollment_code(code: str) -> tuple[UUID, str]:
     return tenant_id, secret
 
 
+# ---------------------------------------------------------------- a task's page in parts
+
+# A part of a long task's conversation holds about this many actions or rounds.
+PART_ACTIONS = 200
+PART_ROUNDS = 20
+
+
+def part_start(
+    round_starts: Sequence[datetime],
+    action_times: Sequence[datetime],
+    before: datetime | None = None,
+) -> datetime | None:
+    """Where the part of a task's conversation that ends at ``before`` starts (the
+    latest part, without it). A part starts at a round, the start of a run of the main
+    agent: it takes rounds from the newest back until it holds ``PART_ACTIONS`` actions
+    or ``PART_ROUNDS`` rounds, and at least one. None: it reaches back to the task's
+    start, so nothing is earlier."""
+    rounds = sorted((t for t in round_starts if before is None or t < before), reverse=True)
+    times = sorted(t for t in action_times if before is None or t < before)
+    for taken, start in enumerate(rounds, start=1):
+        if taken == len(rounds):
+            return None
+        held = len(times) - bisect_left(times, start)
+        if held >= PART_ACTIONS or taken >= PART_ROUNDS:
+            return start
+    return None
+
+
 # ---------------------------------------------------------------- deletion and retention (§19)
 
 
@@ -1198,7 +1255,7 @@ def check_model(model: str, catalog: Collection[str]) -> None:
 
 
 def allowed_providers(chosen: Sequence[str] | None, default_provider: str) -> frozenset[str]:
-    """The providers a tenant's screenshots and text may go to : the
+    """The providers a tenant's screenshots and text may go to: the
     owner's choice, or, until an owner chooses, only the default model's provider."""
     return frozenset(chosen) if chosen is not None else frozenset({default_provider})
 
@@ -1219,7 +1276,7 @@ def fallback_model(
     catalog: Sequence[tuple[str, str]],
     allowed: Collection[str],
 ) -> str | None:
-    """The model a task falls back to when its model keeps failing : the first
+    """The model a task falls back to when its model keeps failing: the first
     in the catalog's order, other than the current one and the ones that already failed
     since the run's last successful step, whose provider the tenant allows. None when
     there is none: the run then waits for a person. ``catalog`` is (name, provider)."""
@@ -1346,7 +1403,7 @@ def grant_covers(
     app; the input's sensitive effects are among the grant's (or, for a grant without
     any, the input has none either); the same recipient and sender; and nothing about
     it is approved one by one. A retry of an action confirmed without effect is not
-    covered: the person decides whether to try again ."""
+    covered: the person decides whether to try again."""
     if grant_status(grant, control_revision=control_revision, now=now) != "active":
         return False
     if grant.device_id != device_id or grant.app != app or retry:

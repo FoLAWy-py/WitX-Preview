@@ -1,6 +1,6 @@
 """Runs, model steps and tool calls."""
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -8,7 +8,16 @@ from uuid import UUID, uuid4
 from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from witx.domain.model import Run, RunStatus, RunSummary, Saying, Step, ToolCall, WaitReason
+from witx.domain.model import (
+    TERMINAL_RUN,
+    Run,
+    RunStatus,
+    RunSummary,
+    Saying,
+    Step,
+    ToolCall,
+    WaitReason,
+)
 from witx.store.db import execute, fetch, fetch_one, jsonb
 
 _RUN = """id, tenant_id, task_id, parent_run_id, goal, status, wait_reason, wait_detail,
@@ -107,9 +116,17 @@ async def get(conn: AsyncConnection, run_id: UUID, *, lock: bool = False) -> Run
     return _run(row) if row else None
 
 
-async def for_task(conn: AsyncConnection, task_id: UUID) -> list[Run]:
+async def for_task(
+    conn: AsyncConnection, task_id: UUID, *, changed: Collection[UUID] | None = None
+) -> list[Run]:
+    """The task's runs; with ``changed``, only those and the ones not over yet."""
+    only = "" if changed is None else " AND (id = ANY(:ids) OR NOT (status = ANY(:over)))"
     rows = await fetch(
-        conn, f"SELECT {_RUN} FROM runs WHERE task_id = :t ORDER BY created_at", t=task_id
+        conn,
+        f"SELECT {_RUN} FROM runs WHERE task_id = :t{only} ORDER BY created_at",
+        t=task_id,
+        ids=list(changed or ()),
+        over=[s.value for s in TERMINAL_RUN],
     )
     return [_run(r) for r in rows]
 
@@ -579,20 +596,38 @@ async def latest_plan_call(conn: AsyncConnection, run_id: UUID) -> dict[str, Any
     return dict(row["arguments"]) if row else None
 
 
-async def task_notes(conn: AsyncConnection, task_id: UUID) -> list[RowMapping]:
-    """What the agent wrote down in ``notes`` with its inputs, oldest first, with the
-    screenshot each describes and when that screenshot was taken."""
+async def task_notes(
+    conn: AsyncConnection,
+    task_id: UUID,
+    *,
+    runs: Collection[UUID] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[RowMapping]:
+    """What the agent wrote down in ``notes`` with its inputs, oldest first, with the run
+    that wrote it, the screenshot it describes and when that screenshot was taken; with
+    ``runs``, only those runs' notes (a run writes notes only while it is not over); with
+    ``start`` or ``end``, only those of steps begun from ``start`` and before ``end``."""
+    only = "" if runs is None else " AND r.id = ANY(:runs)"
+    if start is not None:
+        only += " AND s.started_at >= :start"
+    if end is not None:
+        only += " AND s.started_at < :end"
     return list(
         await fetch(
             conn,
-            """SELECT c.arguments->>'notes' AS text, o.id AS observation_id, o.captured_at
+            f"""SELECT c.arguments->>'notes' AS text, r.id AS run_id, o.id AS observation_id,
+                       o.captured_at
                  FROM tool_calls c
                  JOIN runs r ON r.id = c.run_id
                  JOIN steps s ON s.id = c.step_id
                  LEFT JOIN observations o
                         ON o.id::text = c.arguments->>'observation_id' AND o.task_id = r.task_id
-                WHERE r.task_id = :t AND COALESCE(c.arguments->>'notes', '') <> ''
+                WHERE r.task_id = :t AND COALESCE(c.arguments->>'notes', '') <> ''{only}
                 ORDER BY s.started_at, c.call_id""",
             t=task_id,
+            runs=list(runs or ()),
+            start=start,
+            end=end,
         )
     )

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
@@ -8,7 +8,7 @@ test("what the agent remembers on its own shows in the conversation and can be u
 }) => {
   await mockApi(page, []);
   const undone: string[] = [];
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({
       json: {
         ...task,

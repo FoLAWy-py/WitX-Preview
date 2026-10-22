@@ -7,6 +7,7 @@ import {
   openQuestions,
   screenshotAfter,
   type TimelineItem,
+  inPart,
 } from "./timeline";
 
 const task: TaskDetail = {
@@ -621,5 +622,30 @@ describe("timeline", () => {
       ["a", "repeating"],
       ["b", "Which account?"],
     ]);
+  });
+});
+
+describe("a long task's loaded part", () => {
+  const item = (at: string, status = "done", effect = "changed") => ({
+    kind: "action" as const,
+    at,
+    key: `a-${at}-${status}-${effect}`,
+    action: { status, effect } as ActionView,
+  });
+
+  it("is what the conversation shows, and any input that waits or whose effect is unknown, however old", () => {
+    const items = [
+      item("2026-10-10T09:00:00Z"),
+      item("2026-10-10T09:01:00Z", "awaiting_approval", "not_attempted"),
+      item("2026-10-10T09:02:00Z", "done", "unknown"),
+      item("2026-10-10T10:00:00.5Z"),
+    ];
+
+    expect(inPart(items, "2026-10-10T10:00:00Z").map((i) => i.at)).toEqual([
+      "2026-10-10T09:01:00Z",
+      "2026-10-10T09:02:00Z",
+      "2026-10-10T10:00:00.5Z",
+    ]);
+    expect(inPart(items, undefined)).toEqual(items);
   });
 });

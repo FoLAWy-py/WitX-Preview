@@ -18,6 +18,7 @@ import {
 import { agentName, nameDevices, runLabel } from "@/lib/agents";
 import { ApprovalCard } from "./Approval";
 import { PlanCard } from "./PlanCard";
+import { SkillOffer } from "./SkillOffer";
 import { SkillDraftCard } from "./Skills";
 import { QuestionAnswer } from "./QuestionAnswer";
 import { Rich } from "./Rich";
@@ -557,6 +558,13 @@ export function Conversation({
                     ids={item.result.evidence_observation_ids}
                     devices={devices}
                   />
+                  {/* Offered on the last thing said, until the person goes on. */}
+                  {item.result.offer_skill &&
+                    !scope &&
+                    !live &&
+                    index === list.length - 1 && (
+                      <SkillOffer task={task} onChange={onChange} />
+                    )}
                 </div>
               </li>
             );

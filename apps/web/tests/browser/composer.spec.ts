@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask, signIn } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
@@ -23,7 +23,7 @@ test("a message sent while the agent works waits queued, and can be taken back o
     ],
   };
   const calls: string[] = [];
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: queuedTask }),
   );
   await page.route("**/api/v1/tasks/t1/steer", (route) => {
@@ -105,7 +105,7 @@ test("one button sends a message, pauses a running task and resumes a paused one
   await mockApi(page, []);
   let status = "active";
   const calls: unknown[] = [];
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: { ...task, status } }),
   );
   for (const what of ["pause", "resume", "inputs"]) {
@@ -328,9 +328,7 @@ test("a message of the person's can be copied, edited into the message box, or s
     runs: [{ ...task.runs[0], status: "running", wait_reason: null }],
     actions: [],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
-    route.fulfill({ json: running }),
-  );
+  await page.route(detailOf("t1"), (route) => route.fulfill({ json: running }));
   await page.route("**/api/v1/tasks/t1/inputs", (route) => {
     sent.push(route.request().postDataJSON());
     return route.fulfill({ json: running });
@@ -494,7 +492,7 @@ test("a finished task's model can still be switched, and a new task starts with 
     status: "completed",
     runs: [{ ...task.runs[0], status: "completed", wait_reason: null }],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
   );
   const switched: unknown[] = [];

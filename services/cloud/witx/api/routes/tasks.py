@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -33,10 +34,41 @@ from witx.store import execution, runs, tasks
 log = logging.getLogger(__name__)
 
 
+# Kinds of event, comma-separated: what a page shows of a task's events.
+Types = Annotated[str | None, Query(max_length=2000)]
+
+
+def type_set(types: str | None) -> set[str]:
+    return set(filter(None, (types or "").split(",")))
+
+
+# The most unfinished records a page names when it asks for a task's changes; holding
+# more, it fetches the whole task (apps/web lib/changes.ts, the same number).
+OPEN_HELD_MAX = 150
+
+
+def write_cursor(key: datetime, task_id: UUID) -> str:
+    """Where the next page of a task list starts: the last task's sort time and ID,
+    opaque to the client."""
+    return urlsafe_b64encode(f"{key.isoformat()} {task_id}".encode()).decode().rstrip("=")
+
+
+def read_cursor(cursor: str) -> tuple[datetime, UUID]:
+    try:
+        text = urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
+        key, task_id = text.split(" ")
+        at = datetime.fromisoformat(key)
+        if at.tzinfo is None:
+            raise ValueError("a cursor's time has a time zone")
+        return at, UUID(task_id)
+    except (ValueError, UnicodeDecodeError):
+        raise Rejected("invalid_arguments", "cursor is not from a task list") from None
+
+
 def saying_frames(before: dict[UUID, Saying], now: dict[UUID, Saying]) -> list[bytes]:
-    """The ``agent.saying`` frames for what changed in what the runs say or are at. They carry no
-        ``id``: not events, not kept, not resent after a reconnect; an
-    empty text with no phase says a run's step is over."""
+    """The ``agent.saying`` frames for what changed in what the runs say or are at
+    . They carry no ``id``: not events, not kept, not resent after a reconnect; an
+        empty text with no phase says a run's step is over."""
     over = Saying("", None)
     changed = [(run_id, over) for run_id in before.keys() - now.keys()]
     changed += [(run_id, s) for run_id, s in now.items() if before.get(run_id) != s]
@@ -53,33 +85,44 @@ def routes(d: Deps) -> APIRouter:
 
     @router.get("/api/v1/tasks")
     async def list_tasks(
+        request: Request,
+        response: Response,
         who: CurrentActor,
         group: str | None = None,
         attention: bool = False,
         q: str | None = Query(None, max_length=200),
         limit: int = Query(100, ge=1, le=500),
         pinned: Literal["only", "without"] | None = None,
+        cursor: str | None = Query(None, max_length=200),
     ) -> list[api.TaskSummary]:
-        """Recent tasks, newest change first. ``group`` is a group's ID, or ``none`` for
-        tasks in no group; ``attention`` keeps only tasks that wait for someone; ``q``
-        only goals containing that text; ``pinned`` only the tasks the signed-in person
-        pinned (latest pinned first), or none of them."""
+        """Recent tasks, newest change first, ``limit`` at a time. ``group`` is a group's
+        ID, or ``none`` for tasks in no group; ``attention`` keeps only tasks that wait
+        for someone; ``q`` only goals containing that text; ``pinned`` only the tasks the
+        signed-in person pinned (latest pinned first), or none of them. When more
+        follow, the ``Link`` header's ``rel="next"`` is the URL of the next page."""
         if group not in (None, tasks.UNGROUPED):
             try:
                 UUID(str(group))
             except ValueError:
                 raise Rejected("invalid_arguments", "group is a group ID or none") from None
+        after = read_cursor(cursor) if cursor else None
         async with d.db.tenant(who.tenant_id) as conn:
             found = await tasks.list_with_attention(
                 conn,
-                limit,
+                limit + 1,
                 group=group,
                 attention_only=attention,
                 search=(q or "").strip(),
                 pins=(who.user_id, pinned) if pinned else None,
+                after=after,
             )
-            mine = await tasks.pinned(conn, who.user_id, [t.id for t, _ in found])
-            return [views.summary(t, needs, pinned=t.id in mine) for t, needs in found]
+            page = found[:limit]
+            if len(found) > limit:
+                last, _, key = page[-1]
+                next_page = request.url.include_query_params(cursor=write_cursor(key, last.id))
+                response.headers["Link"] = f'<{next_page.path}?{next_page.query}>; rel="next"'
+            mine = await tasks.pinned(conn, who.user_id, [t.id for t, _, _ in page])
+            return [views.summary(t, needs, pinned=t.id in mine) for t, needs, _ in page]
 
     @router.get("/api/v1/task-groups")
     async def list_task_groups(who: CurrentActor) -> list[api.TaskGroupView]:
@@ -128,9 +171,9 @@ def routes(d: Deps) -> APIRouter:
                 raise Rejected("not_found", "group not found")
             if not await tasks.set_group(conn, task_id, body.group_id):
                 raise Rejected("not_found", "task not found")
-            (moved,) = await tasks.list_with_attention(conn, 1, task_id=task_id)
+            ((moved, needs, _),) = await tasks.list_with_attention(conn, 1, task_id=task_id)
             mine = await tasks.pinned(conn, who.user_id, [task_id])
-            return views.summary(*moved, pinned=task_id in mine)
+            return views.summary(moved, needs, pinned=task_id in mine)
 
     @router.put("/api/v1/tasks/{task_id}/pin", status_code=204)
     async def pin_task(task_id: UUID, who: CurrentActor) -> None:
@@ -172,12 +215,56 @@ def routes(d: Deps) -> APIRouter:
             return await d.once(conn, who, key, request, body, api.TaskDetail, write)
 
     @router.get("/api/v1/tasks/{task_id}")
-    async def get_task(task_id: UUID, who: CurrentActor) -> api.TaskDetail:
+    async def get_task(
+        task_id: UUID,
+        who: CurrentActor,
+        start: Annotated[datetime | None, Query(alias="from")] = None,
+        types: Types = None,
+    ) -> api.TaskDetail:
+        """The task as its page shows it. A long task comes in parts: the latest
+        part, or with ``from`` everything from that time on (the part a page holds, when
+        it fetches the whole task again). ``types`` (comma-separated): the events of
+        these kinds in that part come with it."""
         async with d.db.tenant(who.tenant_id) as conn:
             task = await tasks.get(conn, task_id)
             if task is None:
                 raise HTTPException(404, "task not found")
-            return await views.task_detail(conn, task)
+            return await views.task_detail(
+                conn, task, start=start or "latest", types=type_set(types)
+            )
+
+    @router.get("/api/v1/tasks/{task_id}/earlier")
+    async def task_earlier(
+        task_id: UUID, who: CurrentActor, before: datetime, types: Types = None
+    ) -> api.TaskEarlier:
+        """The part of the task before ``before`` (its ``earlier``), by the rule of the
+        first part, with the events of the ``types`` asked for."""
+        async with d.db.tenant(who.tenant_id) as conn:
+            task = await tasks.get(conn, task_id)
+            if task is None:
+                raise HTTPException(404, "task not found")
+            return await views.task_earlier(conn, task, before, type_set(types))
+
+    @router.get("/api/v1/tasks/{task_id}/changes")
+    async def task_changes(
+        task_id: UUID,
+        who: CurrentActor,
+        since: Annotated[int, Query(ge=0)],
+        held: Annotated[str, Query(alias="open", max_length=OPEN_HELD_MAX * 37)] = "",
+    ) -> api.TaskChanges:
+        """What changed after the event ``since`` (``TaskDetail.last_event_seq`` of what
+        the page holds): the page fetches this after each burst of events, not the whole
+        task. ``open`` (comma-separated IDs) are the actions, screenshots and runs the page
+        holds as not finished."""
+        try:
+            held_open = {UUID(i) for i in held.split(",") if i}
+        except ValueError:
+            raise Rejected("invalid_arguments", "open is a list of IDs") from None
+        async with d.db.tenant(who.tenant_id) as conn:
+            task = await tasks.get(conn, task_id)
+            if task is None:
+                raise HTTPException(404, "task not found")
+            return await views.task_changes(conn, task, since, held_open)
 
     @router.post("/api/v1/tasks/{task_id}/inputs")
     async def add_input(
@@ -337,7 +424,7 @@ def routes(d: Deps) -> APIRouter:
 
     @router.delete("/api/v1/tasks/{task_id}", status_code=204)
     async def delete_task(task_id: UUID, who: CurrentActor) -> None:
-        """Deletes a finished task . It disappears at once; its screenshots
+        """Deletes a finished task. It disappears at once; its screenshots
         and content are purged shortly after. Deleting again is not an error."""
         async with d.db.tenant(who.tenant_id) as conn:
             await retention.delete_task(conn, who, task_id, datetime.now(UTC), d.objects)
@@ -382,13 +469,19 @@ def routes(d: Deps) -> APIRouter:
         task_id: UUID,
         who: CurrentActor,
         after: int = 0,
+        types: Types = None,
         last_event_id: Annotated[int | None, Header()] = None,
     ) -> StreamingResponse:
-        """Server-sent events, in order and without gaps. Resume with `Last-Event-ID`."""
+        """Server-sent events, in order and without gaps. Resume with `Last-Event-ID`.
+        ``types`` (comma-separated) keeps, of the events stored before the stream opened,
+        only those types: a page shows a few kinds and fetches the rest with the task.
+        Every event after that is sent, so the page hears of each change."""
         async with d.db.tenant(who.tenant_id) as conn:
             if await tasks.get(conn, task_id) is None:
                 raise HTTPException(404, "task not found")
+            head = await tasks.last_event_seq(conn, task_id)
         cursor = last_event_id if last_event_id is not None else after
+        wanted = type_set(types) or None
 
         async def stream() -> AsyncIterator[bytes]:
             nonlocal cursor
@@ -402,6 +495,9 @@ def routes(d: Deps) -> APIRouter:
                     yield words
                 saying = now_saying
                 for row in rows:
+                    if wanted is not None and row["seq"] <= head and row["type"] not in wanted:
+                        cursor = row["seq"]
+                        continue
                     event = api.EventView(
                         seq=row["seq"],
                         type=row["type"],

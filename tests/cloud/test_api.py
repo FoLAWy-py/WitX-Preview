@@ -1,7 +1,8 @@
 """Write requests with an Idempotency-Key: a retry gets the first response instead of
-acting again ."""
+acting again."""
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, time
 from pathlib import Path
@@ -207,6 +208,66 @@ async def test_a_schedule_does_not_take_a_group(client) -> None:  # type: ignore
         "group_id": group["id"],
     }
     assert (await web.post("/api/v1/schedules", json=body)).status_code == 422
+
+
+async def every_page(web: httpx.AsyncClient, url: str, **params: Any) -> list[list[str]]:
+    """The IDs on each page of a task list, following ``Link: <…>; rel="next"``."""
+    pages = []
+    response = await web.get(url, params=params)
+    while True:
+        assert response.status_code == 200
+        pages.append([t["id"] for t in response.json()])
+        found = re.fullmatch(r'<([^>]+)>; rel="next"', response.headers.get("link", ""))
+        if not found:
+            return pages
+        response = await web.get(found[1])
+
+
+async def test_a_task_list_comes_a_page_at_a_time_with_every_task_once(  # type: ignore[no-untyped-def]
+    client, admin_db: Database
+) -> None:
+    web, _ = client
+    ids = [
+        (await web.post("/api/v1/tasks", json={"goal": f"Task {n}", "device_ids": []})).json()["id"]
+        for n in range(7)
+    ]
+    # Four last changed at the same earlier moment: their order is still fixed, so no
+    # page repeats or skips one.
+    async with admin_db.system() as conn:
+        await execute(
+            conn,
+            "UPDATE tasks SET updated_at = '2026-10-20T08:00:00Z' WHERE id = ANY(:ids)",
+            ids=[UUID(i) for i in ids[1:5]],
+        )
+
+    pages = await every_page(web, "/api/v1/tasks", group="none", limit=3)
+
+    assert [len(p) for p in pages] == [3, 3, 1]
+    listed = [i for p in pages for i in p]
+    assert sorted(listed) == sorted(ids)
+    assert listed[:3] == [ids[6], ids[5], ids[0]]  # the newest change first
+
+
+async def test_pinned_tasks_come_a_page_at_a_time_latest_pinned_first(client) -> None:  # type: ignore[no-untyped-def]
+    web, _ = client
+    ids = [
+        (await web.post("/api/v1/tasks", json={"goal": f"Task {n}", "device_ids": []})).json()["id"]
+        for n in range(3)
+    ]
+    for task in (ids[1], ids[0], ids[2]):
+        assert (await web.put(f"/api/v1/tasks/{task}/pin")).status_code == 204
+
+    pages = await every_page(web, "/api/v1/tasks", pinned="only", limit=1)
+
+    assert pages == [[ids[2]], [ids[0]], [ids[1]]]
+
+
+async def test_a_task_list_refuses_a_cursor_it_did_not_give(client) -> None:  # type: ignore[no-untyped-def]
+    web, _ = client
+    for cursor in ("not-a-cursor", "MjAyNi0xMC0yMCB4"):
+        response = await web.get("/api/v1/tasks", params={"cursor": cursor})
+        assert response.status_code == 409
+        assert response.json()["code"] == "invalid_arguments"
 
 
 async def test_the_task_list_can_show_only_tasks_that_wait_for_someone(client) -> None:  # type: ignore[no-untyped-def]

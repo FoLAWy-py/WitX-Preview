@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Outlet, useLocation } from "react-router";
+import { Outlet, useLocation, useNavigation } from "react-router";
 import { Menu as MenuIcon } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/format";
@@ -64,6 +64,34 @@ function NavDrawer({
   );
 }
 
+/** How long a page may take to open before a bar at the top says it is coming. */
+const PROGRESS_AFTER_MS = 300;
+
+/** A thin bar across the top while the next page is still loading, once that is noticeable. */
+function NavProgress() {
+  const { t } = useI18n();
+  const loading = useNavigation().state !== "idle";
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!loading) {
+      setShown(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShown(true), PROGRESS_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
+  if (!shown) return null;
+  return (
+    <div
+      role="progressbar"
+      aria-label={t("common.loading")}
+      className="pointer-events-none fixed inset-x-0 top-0 z-[80] h-0.5 overflow-hidden"
+    >
+      <div className="anim-progress h-full w-1/3 bg-accent" />
+    </div>
+  );
+}
+
 /** Pages put their own header, body and right panel inside the shell. */
 export function Shell() {
   const { t } = useI18n();
@@ -98,6 +126,7 @@ export function Shell() {
       // One screen tall, like the wide layout: each page scrolls its own body, so a
       // message box can stay at the bottom.
       <div className="flex h-dvh flex-col overflow-hidden">
+        <NavProgress />
         <div className="flex min-h-0 flex-1">
           <ShellContext.Provider value={phoneContext}>
             <Outlet />
@@ -110,6 +139,7 @@ export function Shell() {
 
   return (
     <div className="flex h-dvh overflow-hidden">
+      <NavProgress />
       <aside
         className={cn(
           "shrink-0 border-r border-line bg-bg transition-[width] duration-200 ease-out",

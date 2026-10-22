@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
+import { detailOf, mockApi } from "./fixtures/api";
 import { openTask } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
@@ -58,7 +58,7 @@ test("a decided approval stays as a line, and the tab's title counts what waits"
       },
     ],
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: approved }),
   );
   await page.goto("/sign-in");
@@ -76,7 +76,7 @@ test("similar steps are approved too only after a confirmation that says what it
 }) => {
   const decisions: unknown[] = [];
   await mockApi(page, decisions);
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: { ...task, actions: [deletion] } }),
   );
   await page.goto("/sign-in");
@@ -122,7 +122,7 @@ test("a standing approval says how many steps it still covers and can be revoked
     expires_at: task.actions[0].approval.expires_at,
     decided_at: "2026-10-10T10:00:30Z",
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({
       json: {
         ...task,
@@ -187,7 +187,7 @@ test("an approval kept in the conversation opens to show what was approved", asy
       decided_at: "2026-10-10T10:00:30Z",
     },
   };
-  await page.route("**/api/v1/tasks/t1", (route) =>
+  await page.route(detailOf("t1"), (route) =>
     route.fulfill({
       json: {
         ...task,

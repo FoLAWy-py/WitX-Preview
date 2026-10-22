@@ -95,6 +95,53 @@ export interface SkillDraft {
   body: string;
 }
 
+/** The kinds of event the conversation shows: `buildTimeline` reads no other. The rest
+ * only say that a record changed, and the page fetches the record (see `applyChanges`),
+ * so a task's page keeps only these and replays only these when it opens. */
+export const SHOWN_EVENTS = new Set([
+  "agent.message",
+  "agent.question",
+  "agent.relay",
+  "agent.web_search",
+  "agent.web_search_on",
+  "goal.achieved",
+  "goal.evaluated",
+  "goal.paused",
+  "goal.resumed",
+  "input.added",
+  "plan.proposed",
+  "purchase.decided",
+  "run.model_error",
+  "run.repeating",
+  "run.unconfirmed",
+  "schedule.proposed",
+  "skill.drafted",
+  "skill.loaded",
+  "takeover.ended",
+  "task.devices",
+  "task.goal",
+  "task.model",
+  "task.plan_mode",
+  "task.reasoning_effort",
+]);
+
+/** What of the conversation the page has loaded: the items from `before` on, and
+ * any input that waits for the person or whose effect is unknown, however old. */
+export function inPart(
+  items: TimelineItem[],
+  before: string | undefined,
+): TimelineItem[] {
+  if (!before) return items;
+  const from = Date.parse(before);
+  return items.filter(
+    (item) =>
+      Date.parse(item.at) >= from ||
+      (item.kind === "action" &&
+        (["awaiting_approval", "queued", "sent"].includes(item.action.status) ||
+          item.action.effect === "unknown")),
+  );
+}
+
 /** Merges the task's stored records and its event stream into one ordered list. */
 export function buildTimeline(
   task: TaskDetail,
