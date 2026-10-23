@@ -289,7 +289,13 @@ def _action(**overrides) -> Action:  # type: ignore[no-untyped-def]
         post_observation_id=uuid4(),
         created_at=NOW,
     )
-    return replace(action, **overrides)
+    action = replace(action, **overrides)
+    if "digest" in overrides:
+        return action
+    digest = rules.action_digest(
+        action.id, action.device_id, action.epoch, action.input, action.intent
+    )
+    return replace(action, digest=digest)
 
 
 def _approval(**overrides) -> Approval:  # type: ignore[no-untyped-def]
@@ -306,8 +312,14 @@ def _approval(**overrides) -> Approval:  # type: ignore[no-untyped-def]
 
 
 def test_delivery_rechecks_lease_revision_and_approval() -> None:
-    ok = {"approval": _approval(), "lease_epoch": 3, "control_revision": 1, "now": NOW}
-    rules.check_deliverable(_action(), **ok)
+    action = _action()
+    ok = {
+        "approval": _approval(digest=action.digest),
+        "lease_epoch": 3,
+        "control_revision": 1,
+        "now": NOW,
+    }
+    rules.check_deliverable(action, **ok)
     cases = [
         ({"lease_epoch": 4}, "lease_changed"),
         ({"control_revision": 2}, "task_changed"),
@@ -319,8 +331,27 @@ def test_delivery_rechecks_lease_revision_and_approval() -> None:
     ]
     for override, code in cases:
         with pytest.raises(Rejected) as error:
-            rules.check_deliverable(_action(), **{**ok, **override})
+            rules.check_deliverable(action, **{**ok, **override})
         assert error.value.code == code
+
+
+def test_an_approved_input_whose_parameters_changed_afterwards_is_not_delivered() -> None:
+    action = _action()
+    ok = {
+        "approval": _approval(digest=action.digest),
+        "lease_epoch": 3,
+        "control_revision": 1,
+        "now": NOW,
+    }
+    changed = [
+        replace(action, input={**action.input, "x": action.input["x"] + 1}),
+        replace(action, intent={"amount": "999", "currency": "cny"}),
+        replace(action, device_id=uuid4()),
+    ]
+    for tampered in changed:
+        with pytest.raises(Rejected) as error:
+            rules.check_deliverable(tampered, **ok)
+        assert error.value.code == "approval_mismatch"
 
 
 def test_gateway_outcomes_map_to_effects() -> None:
@@ -615,3 +646,12 @@ def test_a_part_of_many_small_rounds_stops_at_twenty_rounds() -> None:
 
 def test_a_short_task_is_one_part() -> None:
     assert rules.part_start([_at(0), _at(5)], [_at(1), _at(6)]) is None
+
+
+def test_a_run_stops_trying_once_its_steps_ended_unfinished_several_times_in_a_row() -> None:
+    n = rules.UNFINISHED_STEPS_MAX
+    assert rules.steps_keep_failing(["sent"] + ["abandoned"] * (n - 1))
+    assert not rules.steps_keep_failing(["sent"] + ["abandoned"] * (n - 2))
+    assert not rules.steps_keep_failing(["sent"] + ["abandoned"] * (n - 2) + ["done"])
+    # Resumed by its user: the abandoned steps alone do not stop it again.
+    assert not rules.steps_keep_failing(["abandoned"] * n)

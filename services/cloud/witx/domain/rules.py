@@ -626,7 +626,12 @@ def check_deliverable(
     if needs_approval(action):
         if approval is None or approval_status(approval, now) != "approved":
             raise Rejected("approval_invalid")
-        if approval.digest != action.digest:
+        # The approval covers the parameters as they are now, not only as they were
+        # stored: the digest is computed again from them.
+        current = action_digest(
+            action.id, action.device_id, action.epoch, action.input, action.intent
+        )
+        if not approval.digest == action.digest == current:
             raise Rejected("approval_mismatch")
 
 
@@ -1567,6 +1572,22 @@ def asked_question(wait_detail: str | None) -> bool:
     because it stopped for the user to decide (a model error, a loop, a disagreement)."""
     detail = wait_detail or ""
     return detail not in STOPPED_FOR_USER and not detail.startswith("model error:")
+
+
+# A step that ends without being applied (its worker died, or it raised) is taken again
+# from stored state, and each try calls, and pays for, the model. After this many in a
+# row the run waits for its user instead.
+UNFINISHED_STEPS_MAX = 3
+
+
+def steps_keep_failing(latest: Sequence[str]) -> bool:
+    """Whether a run's latest steps (their statuses, newest first) ended unfinished this
+    many times in a row: the newest was just left ``sent``, the ones before abandoned."""
+    return (
+        len(latest) >= UNFINISHED_STEPS_MAX
+        and latest[0] == "sent"
+        and all(s == "abandoned" for s in latest[1:UNFINISHED_STEPS_MAX])
+    )
 
 
 @dataclass(frozen=True)

@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 async def model_failed(harness: "Harness", prepared: Prepared, error: ModelError) -> None:
     async with harness.db.tenant(prepared.task.tenant_id) as conn:
+        await tasks.get(conn, prepared.task.id, lock=True)  # before the run, as a stop
         # What the provider answered, if it did, so a failure can be read afterwards.
         await runs.finish_step(
             conn,
@@ -46,7 +47,7 @@ async def model_failed(harness: "Harness", prepared: Prepared, error: ModelError
             else None
         )
         if fallback is not None:
-            # The same step again on another model the tenant allows .
+            # The same step again on another model the tenant allows.
             await lifecycle.set_model(
                 conn,
                 task_id=prepared.task.id,
@@ -118,6 +119,8 @@ async def apply(
             "goal": {"verdict": judgement.verdict.verdict, "reason": judgement.verdict.reason}
         }
     async with harness.db.tenant(prepared.task.tenant_id) as conn:
+        # The task first, then the run: the order a stop or pause takes.
+        await tasks.get(conn, prepared.task.id, lock=True)
         run = await runs.get(conn, prepared.run.id, lock=True)
         assert run is not None
         if run.epoch != prepared.epoch or run.status != RunStatus.RUNNING:

@@ -306,18 +306,23 @@ class Executor:
                 post = await self._observe(device, message.post_observation_id, settle=settle)
                 await self._emit(message.post_observation_id, post)
 
+    def _check_current(self, message: wire.Action) -> None:
+        """The action is of the device's current epoch, no stop came for it, and it is
+        not past its deadline."""
+        epoch, stopped = self.journal.epochs(message.device_id)
+        if message.epoch != epoch:
+            raise Rejected("stale_epoch")
+        if message.epoch <= stopped:
+            raise Rejected("stopped")
+        if datetime.now(UTC) >= message.expires_at:
+            raise Rejected("expired")
+
     async def _execute(self, message: wire.Action) -> tuple[str, str | None, dict[str, Any]]:
         device = self.by_id.get(message.device_id)
         try:
             if device is None:
                 raise Rejected("unknown_device")
-            epoch, stopped = self.journal.epochs(message.device_id)
-            if message.epoch != epoch:
-                raise Rejected("stale_epoch")
-            if message.epoch <= stopped:
-                raise Rejected("stopped")
-            if datetime.now(UTC) >= message.expires_at:
-                raise Rejected("expired")
+            self._check_current(message)
             command = message.input
             if command.kind not in device.capabilities:
                 raise Rejected("unsupported_input")
@@ -350,12 +355,21 @@ class Executor:
             if isinstance(command, SelectOption):
                 to_input(command.x, command.y, expected)  # the point must be on the screenshot
             run = self._prepare(device, command, expected)
+            # The checks above wait on the device: a stop, a new lease or the deadline may
+            # have come meanwhile, and no input starts after them (``barrier``). Nothing is
+            # awaited from here to the intent.
+            self._check_current(message)
         except Rejected as error:
             return "rejected", error.reason, {}
         except WrongField as error:  # the agent is told which field has the focus
             return "rejected", error.reason, self._field_report(error.field, message.expected)
         except DeviceError as error:
             return "rejected", error.reason[:64], {}
+        except Exception:
+            # Nothing reached the device yet: a rejection, so the cloud is answered and
+            # the device is not held by an action that never ends.
+            log.exception("checking an input failed")
+            return "rejected", "adapter_error", {}
 
         self.journal.intent(message.action_id)
         try:

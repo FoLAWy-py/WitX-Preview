@@ -415,6 +415,17 @@ async def task_usage(conn: AsyncConnection, task_id: UUID) -> dict[str, int]:
     }
 
 
+async def latest_steps(conn: AsyncConnection, run_id: UUID, limit: int) -> list[tuple[UUID, str]]:
+    """The IDs and statuses of the run's newest steps, newest first."""
+    rows = await fetch(
+        conn,
+        "SELECT id, status FROM steps WHERE run_id = :r ORDER BY seq DESC LIMIT :n",
+        r=run_id,
+        n=limit,
+    )
+    return [(r["id"], r["status"]) for r in rows]
+
+
 async def failed_models_since_success(conn: AsyncConnection, run_id: UUID) -> list[str]:
     """The model of each step that failed since the run's last successful one, in order."""
     rows = await fetch(

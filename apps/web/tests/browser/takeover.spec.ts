@@ -627,3 +627,21 @@ test.describe("on a phone", () => {
     await expect.poll(() => sent.at(-1)).toEqual({ type: "end", resume: true });
   });
 });
+
+test("in a takeover, switching the page's language keeps the takeover going", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  const { connections } = await takeoverWithPictures(page);
+  expect(connections()).toBe(1);
+
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "简体中文" }).click();
+
+  await expect(
+    page.getByRole("img", { name: "Pixel 8 的实时画面" }),
+  ).toBeVisible();
+  await page.waitForTimeout(300); // a socket opened again would be by now
+  // The same connection: the server ends a takeover when its socket closes.
+  expect(connections()).toBe(1);
+});

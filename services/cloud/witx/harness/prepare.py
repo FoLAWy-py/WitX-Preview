@@ -42,10 +42,12 @@ DEVICE_RECHECK = timedelta(seconds=15)
 
 async def prepare(harness: "Harness", run_id: UUID, tenant_id: UUID, epoch: int) -> Prepared | None:
     async with harness.db.tenant(tenant_id) as conn:
+        # The task first, then the run: the order a stop or pause takes.
+        found = await runs.get(conn, run_id)
+        task = await tasks.get(conn, found.task_id, lock=True) if found else None
         run = await runs.get(conn, run_id, lock=True)
         if run is None or run.status != RunStatus.RUNNING or run.epoch != epoch:
             return None
-        task = await tasks.get(conn, run.task_id)
         assert task is not None
         if task.status in lifecycle.PAUSE_STATES:
             await runs.set_state(
@@ -86,6 +88,23 @@ async def prepare(harness: "Harness", run_id: UUID, tenant_id: UUID, epoch: int)
                     "completed_at": now.isoformat(),
                 },
                 epoch=epoch,
+            )
+            return None
+        latest = await runs.latest_steps(conn, run.id, rules.UNFINISHED_STEPS_MAX)
+        if rules.steps_keep_failing([status for _, status in latest]):
+            # Each try is a paid model call: the user resumes the run (once more).
+            await runs.finish_step(conn, latest[0][0], status="abandoned")
+            await runs.set_state(
+                conn,
+                run.id,
+                RunStatus.WAITING,
+                epoch=epoch,
+                wait_reason=WaitReason.USER_INPUT,
+                wait_detail="model error: the step did not finish "
+                f"{rules.UNFINISHED_STEPS_MAX} times in a row",
+            )
+            await tasks.emit(
+                conn, task, "run.model_error", run_id=run.id, code="step_failed", retrying=False
             )
             return None
         held = await lifecycle.ensure_leases(conn, task, run)
@@ -169,7 +188,7 @@ async def prepare(harness: "Harness", run_id: UUID, tenant_id: UUID, epoch: int)
                 "model": task.model,
                 "tools": [t["name"] for t in tools.TOOLS],
                 "history_steps": len(steps),
-                # The plugins whose skills this step could load .
+                # The plugins whose skills this step could load (spec §8.3, D85).
                 "plugins": {
                     s.plugin: {"version": s.version, "sha256": s.digest}
                     for s in harness.skills().values()

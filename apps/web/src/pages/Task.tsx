@@ -86,8 +86,11 @@ function useEvents(taskId: string, after: number | undefined, live: Live) {
   const [connected, setConnected] = useState(true);
   const liveRef = useRef(live);
   liveRef.current = live;
-  const from = useRef(after);
-  from.current ??= after;
+  // Where the stream starts: the task's last event when it was first loaded. The page
+  // stays mounted from one task to the next, so it is kept with the task it is of.
+  const from = useRef<{ taskId: string; after: number }>(undefined);
+  if (after !== undefined && from.current?.taskId !== taskId)
+    from.current = { taskId, after };
   const started = after !== undefined;
 
   useEffect(() => {
@@ -135,7 +138,7 @@ function useEvents(taskId: string, after: number | undefined, live: Live) {
         },
       },
       undefined,
-      from.current,
+      from.current?.after,
     );
     return () => {
       stop();

@@ -111,7 +111,7 @@ const KEY_SHORTCUT: Record<SideKind, string> = {
 };
 
 /**
- * Live control of a device : its screen, refreshed many times a second,
+ * Live control of a device: its screen, refreshed many times a second,
  * where a click is a tap, a held click a long press and a drag a swipe. A drag is sent
  * with the way the pointer took, and that way is drawn on the picture as it is
  * made, until the next picture arrives. The phone is drawn in its frame, with the side
@@ -143,6 +143,10 @@ export function Takeover({
 }) {
   const { api } = useAuth();
   const { t } = useI18n();
+  // The socket reads the words of the language shown now; switching it must not
+  // reconnect, which would end the takeover.
+  const tRef = useRef(t);
+  tRef.current = t;
   const { layout, coarse, landscapePhone } = useLayout();
   const socket = useRef<WebSocket | null>(null);
   const seq = useRef(0);
@@ -282,11 +286,11 @@ export function Takeover({
               return {
                 ...r,
                 state,
-                why: state === "done" ? undefined : why(message, t),
+                why: state === "done" ? undefined : why(message, tRef.current),
               };
             }),
           );
-          setNote(state === "done" ? undefined : why(message, t));
+          setNote(state === "done" ? undefined : why(message, tRef.current));
         } else if (message.type === "ended") setEnded(message.reason);
       };
       ws.onclose = () => setEnded((reason) => reason ?? "disconnected");
@@ -300,7 +304,7 @@ export function Takeover({
         ws.close();
       }
     };
-  }, [api, takeover.takeover_id, t]);
+  }, [api, takeover.takeover_id]);
 
   useEffect(() => {
     if (inline) return;

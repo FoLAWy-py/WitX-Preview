@@ -78,6 +78,22 @@ async def test_a_question_is_answered_from_the_task_without_acting_or_entering_i
     assert "What did it find?" in same and "What did it find?" not in other
 
 
+async def test_a_question_on_a_task_without_a_screenshot_is_answered_from_its_text(
+    rig: Rig,
+) -> None:
+    rig.model.script = [[say("Where to?"), call("ask_user", question="Where to?")]]
+    task = await rig.create_task("Plan a trip", device_ids=[])
+    await rig.settle()
+    await ask(rig, task.id, uuid4(), "What did it ask?")
+    rig.model.script = [[say("Where to go.")]]
+
+    assert await side_chat.answer_open(rig.db, rig.model, rig.objects) == 1  # type: ignore[arg-type]
+    assert "input_image" not in str(rig.model.requests[-1].input)
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        (message,) = await side_chats.for_task(conn, task.id)
+    assert message.answer == "Where to go."
+
+
 async def test_a_question_that_keeps_failing_gets_an_error_not_endless_tries(
     rig: Rig,
 ) -> None:

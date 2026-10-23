@@ -105,8 +105,10 @@ async def _context(conn: AsyncConnection, task: Task) -> tuple[str, UUID | None]
         for o in await execution.task_observations(conn, task.id)
         if o.status == ObservationStatus.COMPLETE and o.object_key and o.captured_at
     ]
-    newest = max(shots, key=lambda o: o.captured_at or datetime.min.replace(tzinfo=UTC))
-    return "\n\n".join(parts), (newest.id if shots else None)
+    newest = max(
+        shots, key=lambda o: o.captured_at or datetime.min.replace(tzinfo=UTC), default=None
+    )
+    return "\n\n".join(parts), (newest.id if newest else None)
 
 
 def _answer_text(output: list[dict[str, Any]]) -> str:

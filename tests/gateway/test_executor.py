@@ -263,6 +263,23 @@ async def test_a_failed_input_call_is_unknown_not_retried(h: Harness) -> None:
     assert h.device.inputs == []
 
 
+async def test_an_unexpected_failure_while_checking_an_input_rejects_it_and_answers_again(
+    h: Harness,
+) -> None:
+    async def broken():  # type: ignore[no-untyped-def]
+        raise KeyError("sessionId")
+
+    h.device.state = broken  # type: ignore[method-assign]
+    action = h.action()
+    await h.executor.action(action)
+    await h.executor.action(action)  # the cloud resends it
+    assert [(r["outcome"], r["reason"]) for r in h.results()] == [
+        ("rejected", "adapter_error"),
+        ("rejected", "adapter_error"),
+    ]
+    assert h.device.inputs == []
+
+
 async def test_after_a_crash_an_intended_action_is_reported_unknown(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     action = h.action()
@@ -301,6 +318,31 @@ async def test_stop_raises_a_barrier_and_waits_for_input_in_flight(h: Harness) -
 
     await h.executor.action(h.action())  # same epoch after the barrier
     assert h.results()[-1]["reason"] == "stopped"
+
+
+@pytest.mark.parametrize("arrives", ["stop", "lease"])
+async def test_a_stop_or_lease_that_comes_while_the_screen_is_checked_keeps_the_input_from_starting(
+    h: Harness, arrives: str
+) -> None:
+    release = asyncio.Event()
+    original_state = h.device.state
+
+    async def slow_state():  # type: ignore[no-untyped-def]
+        await release.wait()
+        return await original_state()
+
+    h.device.state = slow_state  # type: ignore[method-assign]
+    pending = asyncio.create_task(h.executor.action(h.action()))
+    await asyncio.sleep(0.05)
+    if arrives == "stop":
+        h.executor.barrier(wire.Stop(stop_id=uuid4(), device_id=DEVICE_ID, epoch=7))
+    else:
+        h.journal.set_epoch(DEVICE_ID, 8)
+    release.set()
+    await pending
+    assert h.results()[-1]["outcome"] == "rejected"
+    assert h.results()[-1]["reason"] == ("stopped" if arrives == "stop" else "stale_epoch")
+    assert h.device.inputs == []
 
 
 async def test_epochs_never_go_back(h: Harness) -> None:

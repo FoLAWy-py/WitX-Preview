@@ -128,3 +128,25 @@ async def test_only_one_process_at_a_time_does_work_that_must_not_be_done_twice(
         assert first and not second
     async with db.only_one("titles") as again:
         assert again  # released when the first holder finished
+
+
+async def test_every_table_with_a_tenant_column_is_isolated_by_row_level_security(
+    admin_db: Database,
+) -> None:
+    async with admin_db.system() as conn:
+        rows = await fetch(
+            conn,
+            """SELECT c.relname AS name, c.relrowsecurity AS rls,
+                      EXISTS (SELECT 1 FROM pg_policies p
+                               WHERE p.tablename = c.relname AND p.schemaname = 'public')
+                        AS policy
+                 FROM pg_class c
+                 JOIN pg_namespace n ON n.oid = c.relnamespace
+                 JOIN pg_attribute a ON a.attrelid = c.oid
+                WHERE n.nspname = 'public' AND c.relkind = 'r'
+                  AND a.attname = 'tenant_id' AND NOT a.attisdropped""",
+        )
+    tables = {r["name"]: r["rls"] and r["policy"] for r in rows}
+    # Identity, read before a tenant is known (signing in); the app may only read it.
+    assert tables.pop("memberships") is False
+    assert tables and all(tables.values()), [t for t, ok in tables.items() if not ok]

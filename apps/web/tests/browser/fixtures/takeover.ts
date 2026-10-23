@@ -9,7 +9,9 @@ type PushedFrame = { frame_id: number; width: number; height: number };
 export async function takeoverWithPictures(page: Page) {
   const sent: Record<string, unknown>[] = [];
   let push: (frames: PushedFrame[]) => void = () => {};
+  let connections = 0;
   await page.routeWebSocket("**/api/v1/takeovers/k1/connect", (ws) => {
+    connections += 1;
     push = (frames) => {
       for (const frame of frames)
         ws.send(
@@ -45,5 +47,10 @@ export async function takeoverWithPictures(page: Page) {
     .getByRole("region", { name: "Controlling Pixel 8" })
     .getByRole("img", { name: "Live screen of Pixel 8" });
   await expect(screen).toBeVisible();
-  return { sent, screen, push: (frames: PushedFrame[]) => push(frames) };
+  return {
+    sent,
+    screen,
+    push: (frames: PushedFrame[]) => push(frames),
+    connections: () => connections,
+  };
 }

@@ -1,4 +1,4 @@
-"""Where the Gateway keeps its long-term credential .
+"""Where the Gateway keeps its long-term credential.
 
 The system key store (macOS Keychain, Windows Credential Manager, Secret Service on
 Linux) when there is one; otherwise a file only the Gateway's user can read. Servers
@@ -28,16 +28,15 @@ class CredentialStore:
         self._backend = backend or keyring.get_keyring()
 
     def load(self) -> str | None:
-        try:
-            stored = self._backend.get_password(SERVICE, self.account)
-        except KeyringError as error:
-            log.debug("no system key store: %s", error)
-            stored = None
-        if stored:
-            return stored
+        """The credential saved last. The file is read first: it exists only while the
+        last save could not reach the key store, which may still hold an older one."""
         if self.fallback.exists():
             return self.fallback.read_text().strip() or None
-        return None
+        try:
+            return self._backend.get_password(SERVICE, self.account) or None
+        except KeyringError as error:
+            log.debug("no system key store: %s", error)
+            return None
 
     def save(self, credential: str) -> None:
         """Stores the credential, replacing the previous one. Raises if it could not be
