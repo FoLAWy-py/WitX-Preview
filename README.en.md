@@ -19,8 +19,8 @@ Browser ── HTTPS / SSE ── API + Hub ── PostgreSQL
 - Conversational tasks, plan mode, model switching, scheduled tasks, and subtasks across multiple devices.
 - Three permission modes, independent risk assessment, approval of specific actions, and execution audit records.
 - Pause, stop, manual takeover, and state recovery after disconnects or process restarts.
-- Long-term memory, user-authored Skills (including splitting one task into multiple Skills), and Plugins with reviewable versions and contents.
-- Long task conversations open at recent rounds; scroll up to read earlier ones.
+- Long-term memory, user-authored Skills (including splitting one task into multiple Skills), and Plugins with reviewable versions and contents. A completed complex task can offer a button to draft a Skill for you to review and save.
+- Task and device lists update as their state changes. Long conversations open at recent rounds; scroll up to read earlier ones. Screenshots load as they approach the viewport.
 - English and Simplified Chinese, with light and dark themes.
 
 ## Prerequisites
@@ -66,6 +66,28 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173), sign in with the developmen
 iOS text input uses the driver by default. For fields that reject it, the agent can choose on-screen key taps or Paste from the field's menu. Typing Chinese with key taps requires a Simplified Chinese pinyin keyboard on the phone. See [Development and deployment](docs/development.md#ios-文字输入) (Chinese) for configuration and limits.
 
 For real devices, see [gateway.example.toml](services/gateway/gateway.example.toml). Plugins are optional: `uv run witx plugin install basics` fetches content from the [public marketplace](https://github.com/FoLAWy-py/witx-plugins-preview), displays it for review, and installs it after confirmation. The built-in source is named `witx-preview`; `uv run witx plugin install basics@witx-preview` selects it explicitly. There is no need to add the marketplace first. Plugins have their own license notices.
+
+## Working with tasks
+
+Choose the phones, model, and permission mode when creating a task: Ask first, Approve for me (the default), or Full access (which the Owner must first allow). Plan mode inspects and plans before you confirm execution. Payments and transfers require approval of the specific action in every mode.
+
+- Use `/goal` to set or change the task's goal, and `/side` to open a side question that answers without operating the phone. A task without screenshots can answer side questions from its existing text.
+- Long tasks open at their most recent part; scroll up for earlier content. Switching tasks follows the new task's own events. Changing the interface language during manual takeover keeps its connection open.
+- Use `/skill` to ask the agent to draft how the task was done, or use the button offered under a result. Ask the agent to split a task into multiple Skills if needed; each draft can be reviewed, edited, tried, and saved by you. Plugin installation and updates also require confirmation.
+
+## Safety controls and recovery
+
+- **Approval covers the current parameters.** Before dispatching a sensitive action, WitX recomputes its parameter digest and requires it to match the approval. The Gateway checks the device and screen, then checks the stop barrier, lease, and deadline again before input. A stop or new lease received during these checks prevents the old input from starting.
+- **Verify an unknown outcome first.** The same action is not automatically replayed. An input marked UNKNOWN blocks further input on that device until you resolve it using a newer screenshot. Stopping also waits for the Gateway to confirm its barrier.
+- **You decide whether to resume after repeated failures.** If the Worker leaves three consecutive steps unfinished, it waits for the user instead of continuing paid retries. Investigate model service, network, or process errors before resuming. Gateway credentials use the local system key store, with an owner-readable credential file as a fallback; rotation loads the credential saved last.
+
+These checks remain subject to the Preview limitations below. Protect screenshots, task content, model call records, and Gateway credentials as sensitive data.
+
+## Deployment and updates
+
+For a single-host deployment, use [Docker Compose and Nginx](docs/development.md#部署) (Chinese). Run the real-device Gateway on the host alongside the phones. Configure OIDC, HTTPS, and model providers before exposing the service externally.
+
+Before updating an existing deployment, back up the database, screenshots, and Plugins, then apply numbered migrations and update the services. Preserve the recovery ledger separately; see [Development and deployment](docs/development.md#备份恢复) (Chinese) for restore steps and limitations. Keep `.env`, `gateway.toml`, credential files, runtime data, and screenshots containing personal information out of Git.
 
 ## Known Preview limitations
 
