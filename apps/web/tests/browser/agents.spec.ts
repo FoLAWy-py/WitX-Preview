@@ -115,5 +115,5 @@ test("sub-agents' questions are answered one at a time, each to the agent that a
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect
     .poll(() => sent)
-    .toEqual([{ text: "work account", run_id: "r3" }]);
+    .toEqual([{ text: "work account", resume: true, run_id: "r3" }]);
 });

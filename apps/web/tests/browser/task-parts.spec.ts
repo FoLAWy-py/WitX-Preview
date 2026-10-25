@@ -8,8 +8,10 @@ const at = (n: number) =>
   new Date(Date.parse("2026-10-10T10:00:00Z") + n * 60_000).toISOString();
 
 /** A finished task of many rounds, each ending in a result; the page holds the rounds
- * from the 11th on, more than fill the view, and the part before is not loaded yet. */
-function longTask() {
+ * from the 11th on, more than fill the view, and the part before is not loaded yet.
+ * Fetched again `from` its start, as the page does once it holds the part before (after
+ * each reconnect of its event stream, say), the task comes whole, as the server sends it. */
+function longTask(from: string | null) {
   const runs = Array.from({ length: ROUNDS }, (_, i) => ({
     ...task.runs[0],
     id: `r${i + 1}`,
@@ -29,7 +31,10 @@ function longTask() {
     observations: [],
     runs,
     result: runs[ROUNDS - 1].result,
-    earlier: { before: at(20) },
+    earlier:
+      from && Date.parse(from) <= Date.parse(task.created_at)
+        ? null
+        : { before: at(20) },
   };
 }
 
@@ -56,11 +61,18 @@ test("a long task opens at its latest part, and the one before loads as the top 
 }) => {
   await mockApi(page, []);
   await page.route(detailOf("t1"), (route) =>
-    route.fulfill({ json: longTask() }),
+    route.fulfill({
+      json: longTask(new URL(route.request().url()).searchParams.get("from")),
+    }),
   );
   const asked: URL[] = [];
-  await page.route("**/api/v1/tasks/t1/earlier*", (route) => {
+  // The part is sent once the view is left at the top: scrolled there again after the
+  // part came in, it would no longer show where the page kept it.
+  let send = () => {};
+  const scrolled = new Promise<void>((resolve) => (send = resolve));
+  await page.route("**/api/v1/tasks/t1/earlier*", async (route) => {
     asked.push(new URL(route.request().url()));
+    await scrolled;
     return route.fulfill({
       json: {
         actions: [],
@@ -79,6 +91,7 @@ test("a long task opens at its latest part, and the one before loads as the top 
   await expect(result(page, 11)).toHaveCount(1);
 
   await scrollToTopUntil(page, async () => asked.length > 0);
+  send();
 
   await expect(result(page, 1)).toHaveCount(1);
   expect(asked[0].searchParams.get("before")).toBe(at(20));
@@ -94,7 +107,9 @@ test("a long task opens at its latest part, and the one before loads as the top 
 test("a part that fails to load can be asked for again", async ({ page }) => {
   await mockApi(page, []);
   await page.route(detailOf("t1"), (route) =>
-    route.fulfill({ json: longTask() }),
+    route.fulfill({
+      json: longTask(new URL(route.request().url()).searchParams.get("from")),
+    }),
   );
   let failing = true;
   await page.route("**/api/v1/tasks/t1/earlier*", (route) =>

@@ -201,13 +201,17 @@ class Device(Protocol):
         ...
 
     async def type_text(
-        self, text: str, *, replace: bool = False, method: TypeMethod = "set"
+        self, text: str, *, replace: bool = False, method: TypeMethod = "set", person: bool = False
     ) -> str | None:
         """Types ``text`` into the focused field at the cursor; with ``replace``, clears
         the field first so that ``text`` is all it holds. ``method`` is how: "set"
         into the field, "keys" tapped on the keyboard, "paste" through the field's menu.
         Returns why it stopped short ("no_candidate", "no_paste_menu" ...), or None: the
-        field is read back either way."""
+        field is read back either way. A password field that has the focus by now (it
+        moved after ``check_text_target``) gets nothing from the agent: "secure_field";
+        ``person``, typing for a person taking the phone over, does type into it. A field
+        that is gone, or cannot be read, before anything is typed gets nothing either: the
+        reason is returned, not raised (raised, the input's effect would be unknown)."""
         ...
 
     async def read_text_field(self, typed: str = "") -> TextField:
@@ -218,7 +222,8 @@ class Device(Protocol):
 
     async def select_option(self, x: float, y: float, value: str) -> Selection:
         """Scrolls the list around (x, y) until exactly one option shows ``value`` and taps
-        it; taps nothing if there is none, or several."""
+        it; taps nothing if there is none, or several. A screen that cannot be read before
+        the first swipe is a problem too: nothing was touched."""
         ...
 
     async def read_sliders(self) -> list[SliderReading]:
@@ -230,8 +235,10 @@ class Device(Protocol):
         lies under (x, y)."""
         ...
 
-    async def set_picker(self, x: float, y: float, value: str) -> None:
-        """Turns the picker wheel under (x, y) to the item displayed as ``value``."""
+    async def set_picker(self, x: float, y: float, value: str) -> str | None:
+        """Turns the picker wheel under (x, y) to the item displayed as ``value``. Returns
+        why it turned nothing when the wheel is gone, or cannot be read, by then
+        ("no_picker"), else None."""
         ...
 
     async def back(self) -> None: ...

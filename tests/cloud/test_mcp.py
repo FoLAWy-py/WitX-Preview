@@ -6,8 +6,10 @@ import contextlib
 import json
 import socket
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import httpx
 import pytest
@@ -22,6 +24,8 @@ from witx.config import Settings
 from witx.domain import rules
 from witx.domain.model import ActionStatus, PermissionMode, RiskVerdict
 from witx.domain.rules import Rejected
+from witx.services import retention
+from witx.services.identity import Actor
 from witx.store.db import Database, fetch_one
 
 from tests.cloud.rig import Rig
@@ -256,3 +260,52 @@ async def test_a_declined_or_closed_form_decides_nothing(
         )
     assert row is not None and row["status"] == ActionStatus.AWAITING_APPROVAL
     assert approval is None or approval["decision"] is None
+
+
+async def waiting(rig: Rig) -> str:
+    """A task that took a screenshot and asks the user something."""
+    device = rig.tenant.device_ids[0]
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        [call("ask_user", question="Which network?")],
+    ]
+    task = await rig.create_task("Join the Wi-Fi")
+    await rig.settle()
+    return str(task.id)
+
+
+async def test_a_client_messages_a_task_and_pauses_and_resumes_it_once_its_phone_confirms(
+    rig: Rig, server: str
+) -> None:
+    task_id = await waiting(rig)
+    async with client(server) as session:
+        await tool(session, "add_input", task_id=task_id, text="The office one")
+        async with rig.db.tenant(rig.tenant.id) as conn:
+            row = await fetch_one(conn, "SELECT text FROM task_inputs WHERE kind = 'note'")
+        assert row is not None and row["text"] == "The office one"
+
+        paused = await tool(session, "control_task", task_id=task_id, action="pause")
+        assert paused["status"] == "pausing"  # the phone has not confirmed yet
+        await rig.gateway_round()
+        assert (await tool(session, "get_task", task_id=task_id))["status"] == "paused"
+        resumed = await tool(session, "control_task", task_id=task_id, action="resume")
+        assert resumed["status"] == "active"
+
+
+async def test_a_client_gets_a_tasks_screenshot_until_the_task_is_deleted(
+    rig: Rig, server: str
+) -> None:
+    task_id = await waiting(rig)
+    async with client(server) as session:
+        shot = (await tool(session, "get_task", task_id=task_id))["latest_screenshots"][-1]
+        image = await session.call_tool("get_screenshot", {"screenshot_id": shot})
+        assert not image.is_error and image.content[0].type == "image"
+
+        stopped = await tool(session, "control_task", task_id=task_id, action="stop")
+        assert stopped["status"] == "stopping"  # until the phone confirms
+        await rig.gateway_round()
+        owner = Actor(rig.tenant.user_id, "Acme", rig.tenant.id, "acme", "owner")
+        async with rig.db.tenant(rig.tenant.id) as conn:
+            await retention.delete_task(conn, owner, UUID(task_id), datetime.now(UTC), rig.objects)
+        gone = await session.call_tool("get_screenshot", {"screenshot_id": shot})
+        assert gone.is_error

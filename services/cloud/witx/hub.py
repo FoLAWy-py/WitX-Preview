@@ -127,7 +127,8 @@ class Hub:
         for one of them that can be used now. The wake-up is a transaction of its
         own, after the report is committed: a step that found the device unusable held
         its row until it began to wait, so it is waiting by then; and the two never take
-        a run's and a device's locks in opposite order."""
+        a run's and a device's locks in opposite order. The wake-up takes the tasks before
+        their runs, as a step and a stop do (``runs.wake_for_devices``)."""
         async with self.db.tenant(session.tenant_id) as conn:
             registered = await devices.sync_gateway_devices(
                 conn,

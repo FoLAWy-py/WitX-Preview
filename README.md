@@ -2,41 +2,44 @@
 
 简体中文 | [English](README.en.md)
 
-WitX 是供个人自部署、自用的手机操作 Agent。你在网页里提出请求，云端 Agent 根据真实截图操作自己的 Android / iOS 手机，手机旁的 Gateway 通过 Appium 执行输入。
+WitX 让你在网页里用自然语言操作自己的 Android 和 iOS 手机。说清楚要做什么，Agent 会看手机截图、安排步骤，再通过手机旁的 Gateway 执行。你可以查看过程、批准敏感操作，也可以暂停任务后亲自接管。
 
-本仓库包含云端、Gateway、Web、共享协议、测试与部署模板。Preview 适合开发者在测试设备上、有人监督的情况下体验；任务正确率、设备兼容性和性能仍在改进。
+它面向个人自部署、自用。这个 Preview 适合愿意配置服务、连接测试设备的开发者；请先用测试账号体验，并检查重要任务的结果。
 
-```text
-浏览器 ── HTTPS / SSE ── API + Hub ── PostgreSQL
-                          │              ▲
-                          │           Worker / Agent
-                          │
-                          └── WSS ── Gateway ── Appium ── Android / iOS
-```
+## 可以用来做什么
 
-## 能做什么
+- **完成手机上的多步任务**：查找信息、填写表单、修改设置，也可以把不同子任务交给多台手机。
+- **先计划，再执行**：不确定怎么做时，先用计划模式查看方案，再决定是否执行。
+- **保留常用方法**：让 Agent 把完成任务的方法整理成 Skill，自己检查、试用和保存，以后再用。
+- **保持人在掌控中**：选择任务权限，遇到需要批准的操作时确认，必要时暂停、停止或接管手机。
 
-- 对话任务、计划模式、多模型切换、定时任务与多设备子任务。
-- 三档权限模式、独立风险判定、具体动作审批与执行审计。
-- 暂停、停止、人工接管，以及断线和进程重启后的状态恢复。
-- 长期记忆、自己编写的 Skill（可将一个任务拆成多个 Skill），以及可检查版本和内容的 Plugin；复杂任务完成后可从结果下的按钮起草 Skill，检查后再保存。
-- 任务与设备列表随状态变化更新；长任务先显示最近的轮次，向上滚动读取更早的对话，截图接近视野时再加载。
-- 英文 / 简体中文、浅色 / 深色界面。
+界面支持英文和简体中文、浅色和深色主题。Agent 跟随你最新消息的语言回复。长对话先显示最近的内容，向上滚动即可查看更早的过程。
 
 ## 开始前
 
-需要 Python 3.12+、uv、Node 22+、pnpm 10.33.0 和 PostgreSQL 15+。真实 Android 设备需要 ADB 和 Appium UiAutomator2；iOS 需要 macOS、Xcode 和 Appium XCUITest。先用下方假设备例子检查服务连通性，再连接测试手机。
+你需要 Python 3.12+、uv、Node.js 22+、pnpm 10.33.0 和 PostgreSQL 15+。本仓库包含 Web、云端服务、Gateway、测试和部署模板。
 
-模型调用由你配置的供应商账户计费。`.env.example` 的模型名称是配置示例，请改为你的账户可以调用、支持视觉和工具调用的模型。截图和任务上下文会发给你允许的模型供应商。
+先用下面的**假设备**检查服务是否连通，不必立即连接手机。接入真实设备时，Android 需要 ADB 与 Appium UiAutomator2；iOS 需要 macOS、Xcode 与 Appium XCUITest，真机还需要签名和开发者模式。配置步骤见[开发与部署](docs/development.md#配置与真实设备)。
 
-## 本地启动
+模型费用由你自己的供应商账户支付。手机截图和任务内容会发送给你配置的模型供应商；请勿使用包含私人消息、支付信息或其他敏感内容的日常手机。
 
-准备数据库角色和数据库，步骤见 [开发与部署](docs/development.md#数据库)。然后在仓库根目录运行：
+## 先在本机跑起来
+
+### 1. 安装并配置
+
+先按[数据库说明](docs/development.md#数据库)创建数据库和角色，然后在仓库根目录运行：
 
 ```sh
 make setup
 cp .env.example .env
-# 编辑 .env：数据库连接、OPENAI_API_KEY 和 WITX_DEFAULT_MODEL。
+cp services/gateway/gateway.fake.toml gateway.toml
+```
+
+编辑 `.env`，填好数据库连接、模型密钥和 `WITX_DEFAULT_MODEL`。本机体验使用 `WITX_AUTH=dev`；模型名称请改成你的账户可以调用、支持视觉和工具调用的型号。
+
+### 2. 初始化并注册
+
+```sh
 set -a; . ./.env; set +a
 make db-migrate
 psql "$WITX_ADMIN_DATABASE_URL" -c 'GRANT witx_app TO witx_app_login'
@@ -44,68 +47,72 @@ uv run witx admin add-user --tenant demo --subject alice --name Alice
 uv run witx admin add-gateway --tenant demo --name test-host
 ```
 
-最后一条命令打印一次性注册码。复制假设备配置，然后注册：
+保存最后一条命令打印的一次性注册码，下一步注册 Gateway 时要用。
+
+### 3. 启动服务
+
+在三个终端分别启动以下服务。API 和 Worker 的终端都先运行 `set -a; . ./.env; set +a`，加载配置。
+
+| 终端 | 命令 |
+| --- | --- |
+| API | `make dev-api` |
+| Worker | `make dev-worker` |
+| Web | `make dev-web` |
+
+等 API 启动后，在第四个终端注册并启动 Gateway。注册时按提示粘贴注册码，只需做一次。
 
 ```sh
-cp services/gateway/gateway.fake.toml gateway.toml
-```
-
-分别在四个终端运行（API 和 Worker 的终端也需要先加载 `.env`）：
-
-```sh
-make dev-api
-make dev-worker
-make dev-web
-# API 启动后，在 Gateway 终端先注册一次，按提示粘贴注册码：
 uv run witx-gateway --config gateway.toml enroll
 make dev-gateway GATEWAY_CONFIG=gateway.toml
 ```
 
-打开 http://127.0.0.1:5173，以 `.env.example` 中的开发令牌 `dev-token-alice` 登录，在设备页启用假设备。假设备仅用于检查链路，每次输入只改变合成画面的颜色，不模拟真实 App。
+打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)，使用示例令牌 `dev-token-alice` 登录，在设备页启用假设备。它只会改变合成画面的颜色，用来确认链路正常，不会模拟真实 App。
 
-iOS 输入默认使用驱动写入；遇到不接受该方式的输入框，可由 Agent 选择逐键输入或通过输入框菜单粘贴。逐键输入中文需要手机有简体拼音键盘，适用范围与配置见 [开发与部署](docs/development.md#ios-文字输入)。
+准备连接手机时，改用[真实设备配置](services/gateway/gateway.example.toml)，按[设备接入说明](docs/development.md#配置与真实设备)检查环境。
 
-真实设备配置见 [gateway.example.toml](services/gateway/gateway.example.toml)。Plugin 可选：`uv run witx plugin install basics` 会从[公开 marketplace](https://github.com/FoLAWy-py/witx-plugins-preview)获取并展示内容，确认后安装；内置源名称为 `witx-preview`，也可显式运行 `uv run witx plugin install basics@witx-preview`，无需先添加 marketplace。Plugin 具有独立的许可声明。
+## 怎样使用
 
-## 使用任务
+创建任务时选择手机和模型，写清楚目标、范围，以及哪些事情需要先问你。可以先从读取信息或修改测试数据的小任务开始。
 
-创建任务时选择手机、模型与权限模式：询问我、替我审批（默认）或完全访问（需 Owner 先允许）。计划模式先查看和规划，确认后再继续操作。付款和转账在任何模式下都需要对具体动作批准。
+每个任务可以选择权限模式：
 
-- 用 `/goal` 设置或修改任务目标，用 `/side` 打开只回答问题、不操作手机的旁问；没有截图的任务也可以根据已有文字回答旁问。
-- 长任务从最近一段开始显示，向上滚动查看更早内容。切换任务后，对话跟随新任务自己的事件；在人工接管时切换界面语言会保留接管连接。
-- 用 `/skill` 请 Agent 起草本次任务的操作方法，也可以在结果提供该选项时点击保存为 Skill 的按钮。你可以让 Agent 把一个任务拆成多个 Skill，每份草稿都可以编辑、试用，由你检查并保存；Plugin 安装和更新也需要确认。
+| 模式 | 如何处理操作 |
+| --- | --- |
+| 先问我 | 改动数据前先问你，查看和导航可以直接进行。 |
+| 替我审批（默认） | 消息和下单可以直接执行；付款、删除、分享个人数据、修改账户等操作先问你。 |
+| 完全访问 | 放开其他操作的逐项审批，付款和转账仍要批准；需要 Owner 先开启。 |
 
-## 安全控制与恢复
+需要手动操作时，先暂停任务，再接管手机。密码、验证码和支付验证由你处理，不要写进对话或交给 Agent。
 
-- **批准绑定当前参数。** 敏感动作派发前重新计算参数摘要，必须与审批一致。Gateway 在输入前检查设备与屏幕状态，并再次核对停止屏障、租约和截止时间；检查期间到达的停止或新租约会阻止旧输入开始。
-- **执行结果未知时先核实。** 同一个动作不会自动重放。标为 UNKNOWN 的输入会阻止该设备的后续输入，需要你凭更新截图裁定；停止也要等 Gateway 确认屏障后才算完成。
-- **连续异常后由你决定继续。** Worker 连续三次未能完成步骤时会等待用户，避免持续付费重试。先排查模型服务、网络或进程错误，再决定是否继续。Gateway 凭据由本机系统密钥存储管理；不可用时使用仅本机用户可读的凭据文件，轮换后加载最后保存的凭据。
+几个常用入口：
 
-这些检查不能替代下面列出的 Preview 限制。截图、任务内容、模型调用记录和 Gateway 凭据都应按敏感数据保护。
+- `/goal`：设置或修改任务目标。
+- `/side`：针对当前任务提问，旁问只回答，不操作手机。
+- `/skill`：请 Agent 起草本次任务的操作方法。你可以要求拆成多个 Skill，逐份检查后保存。
 
-## 部署与更新
+也可以[安装可选 Plugin](https://github.com/FoLAWy-py/witx-plugins-preview)，给 Agent 提供现成的方法：
 
-单机部署使用 [Docker Compose 与 Nginx](docs/development.md#部署)，真实设备的 Gateway 运行在手机旁的宿主机上。对外访问前配置 OIDC、HTTPS 和模型供应商。
+```sh
+uv run witx plugin install basics
+```
 
-更新已有部署前备份数据库、截图和 Plugin，再执行编号迁移并更新服务。恢复账本需要独立保全；备份恢复步骤和边界见 [开发与部署](docs/development.md#备份恢复)。不要把 `.env`、`gateway.toml`、凭据文件、运行数据或含个人内容的截图提交到 Git。
+安装和更新前会展示内容，由你确认。自己写的 Skill 和 Plugin 都不会自动获得额外权限。
 
-## Preview 的已知限制
+## 使用前要知道
 
-- Gateway 输入前核对设备身份、尺寸、旋转和前台 App，同一个 App 内的页面内容变化仍可能让旧坐标失效。
-- 系统标识的安全输入框会拒绝 Agent 输入；普通明文验证码框、自绘控件以及截图中显示的验证码尚未得到完整保护。请在测试设备上使用，涉及密码、验证码和支付验证时暂停并人工接管，避免把这些内容交给模型。
-- 新截图可以作为完成证据，但不能保证任务的每个要求都已满足。关键结果需要人工检查。
-- 删除任务会清除标题、置顶、相关内容及存储的响应，并清理对应截图；已保存的记忆、Skill 和既有备份有独立生命周期，删除任务不会自动删除它们。
-- Gateway 宿主支持 macOS 和 Linux；Windows 尚未验收。真实设备仍受 Appium、驱动、签名和 App 行为影响。
+- **结果需要检查。** 模型可能看错、点错或漏掉要求；页面也可能在两次截图之间变化。完成提示不代表每个要求都已满足。
+- **遇到“结果未知”先核实。** 设备会等待你凭新截图确认发生了什么，不要直接重复同一操作。停止任务也需要等待设备确认。
+- **敏感内容仍可能出现在截图中。** 系统识别的密码框会阻止 Agent 输入，但普通验证码框、自绘控件和截图里的验证码尚未完全保护。
+- **删除任务不等于删除所有副本。** 已保存的记忆、Skill 和既有备份需要分别管理。
+- **真实设备仍有兼容性限制。** Gateway 宿主支持 macOS 和 Linux；Windows 尚未验收。具体体验受手机系统、Appium 驱动、签名和 App 本身影响。
 
-付款和转账按策略要求对具体动作批准。对真实账户和有外部副作用的任务，请保持人工监督。开发令牌只用于本机测试；对外部署请配置 OIDC 与 HTTPS。
+## 部署、开发与反馈
 
-## 文档与验证
+- [开发与部署](docs/development.md)：真实设备、Docker Compose、HTTPS、升级和备份恢复。对外部署前请配置 OIDC 和 HTTPS；开发令牌只用于本机。
+- [架构](docs/architecture.md)：组件如何配合，以及执行、安全和恢复机制。
+- `make check`：运行代码检查、测试和构建。
 
-- [架构](docs/architecture.md)：组件、动作生命周期和安全机制。
-- [开发与部署](docs/development.md)：配置、测试、Compose、备份恢复和反馈。
-- `make check`：lint、严格类型检查、Python / Web / 浏览器测试和构建。
-
-反馈时请附复现步骤、软件版本、设备平台和脱敏错误信息。提交前移除密钥、设备标识、账号、截图中的个人内容及人工接管输入。发现安全问题时，请先通过 GitHub 的私密漏洞报告入口联系维护者（若已启用），不要把敏感细节贴入公开 issue。
+反馈时请说明复现步骤、软件版本和设备平台，并附脱敏后的错误信息。不要上传密钥、真实设备编号、账号、凭据文件或含个人内容的截图。安全问题请优先通过 GitHub 私密漏洞报告联系维护者（若已启用）。
 
 ## 许可证
 

@@ -232,17 +232,29 @@ async def wake(conn: AsyncConnection, run_id: UUID, reasons: Iterable[WaitReason
 
 async def wake_for_devices(conn: AsyncConnection, device_ids: list[UUID]) -> list[Run]:
     """Makes the runs that wait for a device (``WaitReason.DEVICE``) runnable when they
-    use one of these, so they look again whether they can go on. Returns them."""
+    use one of these, so they look again whether they can go on. Returns them. Their
+    tasks are locked first, in the order of their IDs: a step and a stop take the task
+    before its runs, and the wake-up must not take them the other way round."""
     if not device_ids:
         return []
+    locked = await fetch(
+        conn,
+        """SELECT id FROM tasks
+            WHERE id IN (SELECT task_id FROM runs
+                          WHERE status = 'waiting' AND wait_reason = 'device'
+                            AND device_ids && CAST(:ids AS uuid[]))
+            ORDER BY id FOR UPDATE""",
+        ids=device_ids,
+    )
     rows = await fetch(
         conn,
         f"""UPDATE runs SET status = 'runnable', wait_reason = NULL, wait_detail = NULL,
                    next_wake_at = NULL, updated_at = now()
              WHERE status = 'waiting' AND wait_reason = 'device'
-               AND device_ids && CAST(:ids AS uuid[])
+               AND device_ids && CAST(:ids AS uuid[]) AND task_id = ANY(:tasks)
             RETURNING {_RUN}""",
         ids=device_ids,
+        tasks=[r["id"] for r in locked],
     )
     return [_run(r) for r in rows]
 

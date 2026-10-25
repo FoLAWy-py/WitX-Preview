@@ -572,6 +572,7 @@ export interface TaskGroupView {
 export interface TaskInputCreate {
   text: string;
   run_id?: string | null;
+  resume?: boolean;
 }
 
 export interface TaskInputView {

@@ -65,8 +65,10 @@ export function stepText(action: ActionView): string {
   const input = action.input;
   if (action.kind === "type_text" && typeof input.text === "string")
     return `“${input.text}”`;
-  if (action.kind === "launch_app" && typeof input.app_id === "string")
-    return action.target || input.app_id;
+  if (action.kind === "launch_app") {
+    const app = input.app_id ?? input.query; // by query: the best match opened
+    if (typeof app === "string") return action.target || app;
+  }
   if (action.kind === "find_app" && typeof input.query === "string")
     return `“${input.query}”`;
   if (action.kind === "select_option" && typeof input.value === "string")

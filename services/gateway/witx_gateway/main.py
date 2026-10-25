@@ -100,14 +100,17 @@ def _cloud_url(config: dict[str, Any]) -> str:
         raise SystemExit(str(error)) from None
 
 
-def _journal_path(config: dict[str, Any]) -> Path:
-    return Path(config.get("journal", "witx-gateway.sqlite3"))
+def journal_path(config: dict[str, Any], path: Path) -> Path:
+    """The journal; a relative path is read from the config file's folder. The credential
+    is keyed by the journal's absolute path, so ``enroll`` run by hand and a service that
+    starts in / (launchd, systemd) must find the same one."""
+    return (path.parent / str(config.get("journal", "witx-gateway.sqlite3"))).absolute()
 
 
 def load(path: Path) -> tuple[GatewayClient, Journal]:
     config = tomllib.loads(path.read_text())
-    journal_path = _journal_path(config)
-    journal = Journal(journal_path)
+    journal_file = journal_path(config, path)
+    journal = Journal(journal_file)
     inventory = Inventory(
         config.get("devices", []),
         build=lambda spec, ports: build_device(spec, ports, journal),
@@ -120,7 +123,7 @@ def load(path: Path) -> tuple[GatewayClient, Journal]:
     try:
         client = GatewayClient(
             cloud_url=_cloud_url(config),
-            credentials=CredentialStore(journal_path),
+            credentials=CredentialStore(journal_file),
             journal=journal,
             devices=inventory.devices,
             scan=inventory.refresh,
@@ -138,7 +141,7 @@ def load(path: Path) -> tuple[GatewayClient, Journal]:
 def enroll(path: Path, code: str, *, replace: bool) -> None:
     """Spends the one-time code and stores the credential it returns."""
     config = tomllib.loads(path.read_text())
-    store = CredentialStore(_journal_path(config))
+    store = CredentialStore(journal_path(config, path))
     if store.load() is not None and not replace:
         raise SystemExit("this Gateway is already enrolled; pass --replace to enroll it anew")
     response = httpx.post(
@@ -172,7 +175,7 @@ async def _run(path: Path) -> None:
 async def _doctor(path: Path) -> int:
     config = tomllib.loads(path.read_text())
     appium_url = config.get("appium_url", DEFAULT_APPIUM_URL).rstrip("/")
-    journal = Journal(_journal_path(config))
+    journal = Journal(journal_path(config, path))
     inventory = Inventory(
         config.get("devices", []),
         build=lambda spec, ports: build_device(spec, ports, journal),
@@ -185,7 +188,7 @@ async def _doctor(path: Path) -> int:
         config=path,
         appium_url=appium_url,
         appium_up=await doctor.reachable(f"{appium_url}/status", proxies=False),
-        enrolled=CredentialStore(_journal_path(config)).load() is not None,
+        enrolled=CredentialStore(journal_path(config, path)).load() is not None,
         cloud_url=config["cloud_url"],
         cloud_up=await doctor.reachable(f"{config['cloud_url'].rstrip('/')}/health", proxies=True),
         macos=doctor.macos(),
@@ -199,7 +202,7 @@ async def _setup(path: Path, *, yes: bool, boot: list[str], team: str | None) ->
     """Fixes what ``doctor`` finds and a program can fix, after the person here agrees."""
     config = tomllib.loads(path.read_text())
     appium_url = config.get("appium_url", DEFAULT_APPIUM_URL).rstrip("/")
-    journal = Journal(_journal_path(config))
+    journal = Journal(journal_path(config, path))
     inventory = Inventory(
         config.get("devices", []),
         build=lambda spec, ports: build_device(spec, ports, journal),
@@ -216,7 +219,7 @@ async def _setup(path: Path, *, yes: bool, boot: list[str], team: str | None) ->
         appium_up=await doctor.reachable(f"{appium_url}/status", proxies=False),
         config=path,
         configured={str(d["native_id"]) for d in config.get("devices", [])},
-        log_dir=_journal_path(config).resolve().parent,
+        log_dir=journal_path(config, path).resolve().parent,
         boot=boot,
         team=team,
     )
@@ -261,7 +264,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "forget-device":
         config = tomllib.loads(args.config.read_text())
-        journal = Journal(_journal_path(config))
+        journal = Journal(journal_path(config, args.config))
         forgot = journal.forget_identity(args.native_id)
         journal.close()
         print(

@@ -237,14 +237,34 @@ async def _present_plan(turn: Turn, call: ToolCall) -> None:
     turn.outcome.plan = plan_text
 
 
+async def _check_language(turn: Turn, call: ToolCall, text: str) -> None:
+    """What the user reads is in the language of their newest message: a reply
+    plainly in another is sent back, once a run for each tool, then let through."""
+    written = await tasks.inputs(turn.conn, turn.task.id)
+    mine = [i["text"] for i in written if i["kind"] in ("note", "goal", "constraint")]
+    asked = mine[-1] if mine else turn.task.request or turn.task.goal or ""
+    if not rules.wrong_language(asked, text):
+        return
+    calls = await runs.calls_for_run(turn.conn, turn.run.id)
+    if any(c.name == call.name and (c.output or {}).get("code") == "wrong_language" for c in calls):
+        return
+    raise Rejected(
+        "wrong_language",
+        "write it in the language of the user's newest message, not another; quote what a "
+        f"screen shows as it is. Their message: {asked[:300]}",
+    )
+
+
 async def _ask_user(turn: Turn, call: ToolCall) -> None:
     outcome = turn.outcome
+    # A sub-agent may ask the main agent instead of the user.
+    outcome.ask_main = turn.run.parent_run_id is not None and call.arguments.get("to") == "main"
+    if not outcome.ask_main:
+        await _check_language(turn, call, str(call.arguments.get("question", "")))
     outcome.question = rules.shown_text(str(call.arguments.get("question", "")))[:2000]
     outcome.options, outcome.recommended = rules.ask_options(
         call.arguments.get("options"), call.arguments.get("recommended")
     )
-    # A sub-agent may ask the main agent instead of the user.
-    outcome.ask_main = turn.run.parent_run_id is not None and call.arguments.get("to") == "main"
     await runs.resolve_call(
         turn.conn,
         call.id,
@@ -267,6 +287,8 @@ async def _side_turn_only(turn: Turn, call: ToolCall) -> None:
 
 
 async def _complete_task(turn: Turn, call: ToolCall) -> None:
+    if turn.run.parent_run_id is None:  # a sub-agent reports to the main agent
+        await _check_language(turn, call, str(call.arguments.get("summary", "")))
     turn.outcome.completed = await _complete(turn, call)
 
 

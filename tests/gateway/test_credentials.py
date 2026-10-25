@@ -3,9 +3,11 @@
 import stat
 from pathlib import Path
 
+import pytest
 from keyring.backends import fail
 from keyring.errors import KeyringError
 from witx_gateway.credentials import CredentialStore
+from witx_gateway.main import journal_path
 
 from tests.gateway.keystore import MemoryKeyring
 
@@ -50,3 +52,17 @@ def test_a_credential_the_key_store_would_not_take_replaces_the_one_it_holds(
     del keyring.set_password  # unlocked again: the next one goes to the key store
     store.save("wgw_third")
     assert store.load() == "wgw_third" and not store.fallback.exists()
+
+
+def test_a_relative_journal_is_beside_the_config_wherever_the_gateway_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "witx" / "gateway.toml"
+    monkeypatch.chdir(tmp_path)  # enroll, run by hand next to the config's folder
+    by_hand = journal_path({"journal": "gateway.sqlite3"}, Path("witx/gateway.toml"))
+    monkeypatch.chdir("/")  # the service, as launchd and systemd start it
+    as_service = journal_path({"journal": "gateway.sqlite3"}, config)
+    assert by_hand == as_service == tmp_path / "witx" / "gateway.sqlite3"
+    assert journal_path({"journal": "/var/lib/witx/j.sqlite3"}, config) == Path(
+        "/var/lib/witx/j.sqlite3"
+    )

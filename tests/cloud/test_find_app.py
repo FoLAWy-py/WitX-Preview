@@ -1,7 +1,7 @@
-"""Opening an app: the agent searches the installed apps first, in every mode;
-opening a match below the best is the user's choice in ask mode, and the agent's in
-auto and full; finding nothing sends it to the phone's own search, and then to the
-user."""
+"""Opening an app: the agent opens one by the names it goes by, the best match among
+the installed apps, or searches them first, in every mode; opening a match
+below the best is the user's choice in ask mode, and the agent's in auto and full;
+finding nothing sends it to the phone's own search, and then to the user."""
 
 import json
 from pathlib import Path
@@ -55,6 +55,33 @@ def launch(request: Any, device: Any) -> list[dict[str, Any]]:
             effects=[],
         )
     ]
+
+
+def launch_by_name(request: Any, device: Any) -> list[dict[str, Any]]:
+    return [
+        call(
+            "launch_app",
+            device_id=device,
+            observation_id=last_screenshot(request),
+            query="计算器 calculator",
+            app_id=None,
+            target="Calculator",
+            expected_effect="the calculator opens",
+            effects=[],
+        )
+    ]
+
+
+async def opened_by_name(rig: Rig, then: Any = None, **task_kw: Any) -> Any:
+    device = rig.tenant.device_ids[0]
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        lambda r: launch_by_name(r, device),
+        *([then] if then else []),
+    ]
+    task = await rig.create_task("Open the calculator", **task_kw)
+    await rig.settle()
+    return task
 
 
 async def searched(rig: Rig, then: Any = None, **task_kw: Any) -> Any:
@@ -130,6 +157,44 @@ async def test_with_full_access_a_lower_match_opens_without_asking(
     task = await searched(rig, permission_mode=PermissionMode.FULL)
     _, opening = await rig.actions(task.id)
     assert opening.status == ActionStatus.DONE
+
+
+async def test_opening_an_app_by_name_opens_the_best_match_and_shows_the_others(
+    rig: Rig,
+) -> None:
+    rig.gateway.found_apps = SECOND
+    task = await opened_by_name(rig, permission_mode=PermissionMode.ASK)
+    (opening,) = await rig.actions(task.id)
+    assert opening.status == ActionStatus.DONE  # the best match: no approval, even in ask
+    assert opening.policy is not None and opening.policy.found_rank == 0
+    assert opening.found_apps == SECOND
+    told = (await rig.outputs(task.id))[1]
+    assert told["apps"] == SECOND and "was opened" in told["note"]
+
+
+async def test_in_ask_mode_opening_another_match_of_a_launch_by_name_waits_for_the_user(
+    rig: Rig,
+) -> None:
+    rig.gateway.found_apps = SECOND
+    device = rig.tenant.device_ids[0]
+    task = await opened_by_name(
+        rig, then=lambda r: launch(r, device), permission_mode=PermissionMode.ASK
+    )
+    _, opening = await rig.actions(task.id)
+    assert opening.policy is not None and opening.policy.found_rank == 1
+    assert opening.status == ActionStatus.AWAITING_APPROVAL
+
+
+async def test_when_no_installed_app_matches_a_launch_by_name_the_agent_is_told_to_search(
+    rig: Rig,
+) -> None:
+    asks = call("ask_user", question="This phone has no calculator. Try another phone?")
+    task = await opened_by_name(rig, then=[asks])
+    assert (await rig.root_run(task.id)).status == RunStatus.WAITING  # not failed
+    (opening,) = await rig.actions(task.id)
+    assert opening.effect == Effect.NOT_ATTEMPTED and opening.reason == "app_not_found"
+    told = (await rig.outputs(task.id))[1]
+    assert "swipe down from the middle" in told["note"] and "ask_user" in told["note"]
 
 
 @pytest.mark.parametrize(

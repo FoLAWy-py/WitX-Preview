@@ -1,4 +1,4 @@
-"""A message's or payment's terms : stated by the agent, checked against the
+"""A message's or payment's terms: stated by the agent, checked against the
 screenshot by the independent risk check, and bound to the approval."""
 
 from pathlib import Path
@@ -49,6 +49,31 @@ def test_terms_match_however_the_screen_formats_them() -> None:
     long = "Please bring the meeting materials and the projector adapter tomorrow"
     preview = {"recipient": "Alice", "body": long[:30] + "…"}
     assert check(["send_message"], {"recipient": "Alice", "body": long}, preview)[1] == [
+        "terms match the screen"
+    ]
+
+
+def test_a_name_address_or_number_that_merely_contains_the_other_is_not_the_same() -> None:
+    message = {"recipient": "张三", "body": "Hi"}
+    with pytest.raises(Rejected, match="intent_mismatch"):
+        check(["send_message"], message, {**message, "recipient": "张三丰"})
+    with pytest.raises(Rejected, match="intent_mismatch"):
+        check(
+            ["send_message"],
+            {**message, "recipient": "2345678"},
+            {**message, "recipient": "13812345678"},
+        )
+    with pytest.raises(Rejected, match="intent_mismatch"):
+        check(["purchase"], {**ORDER, "address": "3号楼"}, {**ORDER, "address": "朝阳区13号楼"})
+
+
+def test_a_whole_word_more_a_country_code_or_text_the_screen_cuts_short_still_matches() -> None:
+    message = {"recipient": "13911112959", "body": "Hi"}
+    assert check(["send_message"], message, {**message, "recipient": "+86 139 1111 2959"})[1] == [
+        "terms match the screen"
+    ]
+    declared = {**ORDER, "address": "绿地新都会 3 号楼 1201"}
+    assert check(["purchase"], declared, {**ORDER, "address": "…3 号楼 1201"})[1] == [
         "terms match the screen"
     ]
 

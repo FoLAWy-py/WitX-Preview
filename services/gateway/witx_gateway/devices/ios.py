@@ -554,21 +554,39 @@ class IOSDevice(AppiumDevice):
         # 11 s once on a real iPhone playing video, the W3C gestures around it 3 s.
         await self._touch([move(x, y), DOWN, pause(PRESS_MS), UP])
 
+    async def _secure(self, element_id: str) -> bool:
+        kind = await self._session_call("GET", f"/element/{element_id}/attribute/type")
+        return bool(kind == "XCUIElementTypeSecureTextField")
+
     async def check_text_target(self, point: tuple[float, float] | None = None) -> None:
         element_id = await self._focused_element()
-        kind = await self._session_call("GET", f"/element/{element_id}/attribute/type")
-        if kind == "XCUIElementTypeSecureTextField":
+        if await self._secure(element_id):
             raise DeviceError("secure_field")
         await self._check_field_at(element_id, point)
 
-    async def type_text(
-        self, text: str, *, replace: bool = False, method: TypeMethod = "set"
-    ) -> str | None:
-        if method == "keys":
-            return await self._type_keys(text, replace)
-        if method == "paste":
-            return await self._paste(text, replace)
+    async def _typing_field(self, person: bool) -> str:
+        """The focused field, read again just before typing. Raises DeviceError
+        ("secure_field") for a password field the agent would type into: the focus can
+        move to one after ``check_text_target`` (a form going on). A person taking the
+        phone over types passwords: that is what they are for."""
         element_id = await self._focused_element()
+        if not person and await self._secure(element_id):
+            raise DeviceError("secure_field")
+        return element_id
+
+    async def type_text(
+        self, text: str, *, replace: bool = False, method: TypeMethod = "set", person: bool = False
+    ) -> str | None:
+        # Each way first only reads (the focus again, see ``_typing_field``, and what else
+        # it needs). What fails then has typed nothing, and says why instead of raising.
+        if method == "keys":
+            return await self._type_keys(text, replace, person)
+        if method == "paste":
+            return await self._paste(text, replace, person)
+        try:
+            element_id = await self._typing_field(person)
+        except DeviceError as error:
+            return error.reason
         if replace:
             await self._session_call("POST", f"/element/{element_id}/clear")
         await self._session_call("POST", f"/element/{element_id}/value", {"text": text})
@@ -613,7 +631,7 @@ class IOSDevice(AppiumDevice):
             raise _Stop("no_keyboard")
         return board
 
-    async def _type_keys(self, text: str, replace: bool) -> str | None:
+    async def _type_keys(self, text: str, replace: bool, person: bool) -> str | None:
         """Taps the text in on the keyboard. Chinese and Latin letters go in through
         a pinyin keyboard's candidates, picked by their text; other characters a key at a
         time, from whichever of the keyboard's pages has them."""
@@ -621,13 +639,20 @@ class IOSDevice(AppiumDevice):
             return "too_long_for_keys"
         if keyboard.untypable(text) is not None:
             return "not_on_keyboard"
+        try:  # only reads, before the first key: what fails here has tapped nothing
+            element_id = await self._typing_field(person)
+            holds = bool(replace and await self._field_holds(element_id))
+            board = await self._board()
+        except DeviceError as error:
+            return error.reason
+        except _Stop as stop:
+            return stop.problem
         try:
-            typing = _KeyTyping(self, await self._board())
+            typing = _KeyTyping(self, board)
             parts = keyboard.tokens(text)
             if any(p.kind == "han" for p in parts) and not await typing.use(chinese=True):
                 return "no_pinyin_keyboard"
-            element_id = await self._focused_element()
-            if replace and await self._field_holds(element_id):
+            if holds:
                 await self._delete_all(element_id)
                 await typing.read()
             for n, part in enumerate(parts):
@@ -637,18 +662,21 @@ class IOSDevice(AppiumDevice):
             return stop.problem
         return None
 
-    async def _paste(self, text: str, replace: bool) -> str | None:
+    async def _paste(self, text: str, replace: bool, person: bool) -> str | None:
         """Pastes through the field's own menu, as a person does: the app reads nothing
         from the pasteboard by itself, so iOS asks no one. The pasteboard is set from this
         Mac and read back, and emptied afterwards, also when the paste failed: it must not
         keep the text for other apps. Only into an empty field: a tap would put the cursor
         somewhere in its text; what a field holds is deleted first on ``replace``. Done
         when the field holds text: a paste of something else (a picture) puts none in."""
-        element_id = await self._focused_element()
-        box = await self._field_box(element_id)
+        try:  # only reads, before the pasteboard is set: what fails here has pasted nothing
+            element_id = await self._typing_field(person)
+            box = await self._field_box(element_id)
+            holds = await self._field_holds(element_id)
+        except DeviceError as error:
+            return error.reason
         if box is None:
             return "no_field_box"
-        holds = await self._field_holds(element_id)
         if holds and not replace:
             return "field_not_empty"
         try:
@@ -726,8 +754,7 @@ class IOSDevice(AppiumDevice):
 
     async def read_text_field(self, typed: str = "") -> TextField:
         element_id = await self._focused_element()
-        kind = await self._session_call("GET", f"/element/{element_id}/attribute/type")
-        if kind == "XCUIElementTypeSecureTextField":
+        if await self._secure(element_id):
             raise DeviceError("secure_field")
         value = await self._session_call("GET", f"/element/{element_id}/attribute/value")
         text = str(value or "")
@@ -787,14 +814,18 @@ class IOSDevice(AppiumDevice):
     async def check_picker_target(self, x: float, y: float) -> None:
         await self._control_at(x, y)
 
-    async def set_picker(self, x: float, y: float, value: str) -> None:
+    async def set_picker(self, x: float, y: float, value: str) -> str | None:
         # XCUITest scrolls the wheel to the item. A value the wheel does not offer leaves
         # it unchanged; the next screenshot shows which.
-        kind, element_id = await self._control_at(x, y)
+        try:  # only reads: a wheel gone since the check is turned nowhere
+            kind, element_id = await self._control_at(x, y)
+        except DeviceError as error:
+            return error.reason
         if kind == "slider":
             await self._set_slider(element_id, value)
-            return
+            return None
         await self._session_call("POST", f"/element/{element_id}/value", {"text": value})
+        return None
 
     async def _set_slider(self, element_id: str, value: str) -> None:
         """Sets a slider to the position it reports as ``value`` ("27%"). Dragging to a

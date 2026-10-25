@@ -48,7 +48,7 @@ import { useSideChats } from "@/components/SideChatTab";
 import { SidePanel, usePanelTabs, type PanelTab } from "@/components/SidePanel";
 import { PageBar } from "@/components/Shell";
 import { Fade, useScrollEdges } from "@/components/ui/fade";
-import { Takeover } from "@/components/Takeover";
+import { loadTakeover, Takeover } from "@/components/takeover/lazy";
 import {
   Button,
   EmptyState,
@@ -448,8 +448,18 @@ function TaskView({
     }
   }
 
+  // Leaving the page stops waiting to take over: a takeover nobody sees only holds the phone.
+  const left = useRef(false);
+  useEffect(() => {
+    left.current = false;
+    return () => {
+      left.current = true;
+    };
+  }, []);
+
   /** Pauses the task if needed, waits until every device confirmed it, then takes over. */
   async function takeOver(deviceId: string) {
+    loadTakeover().catch(() => {}); // shown as the takeover opens, if still missing
     setError(undefined);
     setTakingOver(deviceId);
     setSheet(false);
@@ -458,8 +468,10 @@ function TaskView({
       if (current.status === "active") current = await api.pause(task.id);
       for (let i = 0; i < 60 && current.status === "pausing"; i++) {
         await new Promise((r) => setTimeout(r, 500));
+        if (left.current) return;
         current = await api.task(task.id);
       }
+      if (left.current) return;
       if (current.status !== "paused")
         throw new Error(t("detail.takeover.failed"));
       setTakeover(await api.takeover(task.id, { device_id: deviceId }));
@@ -616,79 +628,81 @@ function TaskView({
           </div>
         )}
 
-        {/* Softened where it scrolls out of sight under the bar and above the
-            composer. */}
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          <Fade side="top" show={edges.above} />
-          <Fade side="bottom" show={edges.below} />
-          <div
-            ref={attachScroller}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              nearBottom.current =
-                el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-              setSettled(true);
-            }}
-            className="scroll-quiet min-h-0 flex-1 overflow-y-auto"
-          >
-            <div className="mx-auto w-full max-w-[760px] space-y-4 px-4 pt-5 pb-6">
-              {task.permission_mode === "full" && !finished && (
-                <p
-                  role="status"
-                  className="flex items-center gap-2 rounded-lg border border-amber/40 bg-amber-soft px-3 py-2 text-[13px] text-amber"
-                >
-                  <Ico icon={ShieldOff} size={15} />
-                  {t("detail.fullOn")}
-                </p>
-              )}
-              {error && <ErrorState message={error} />}
-              {task.earlier &&
-                (early === "failed" ? (
-                  <Button variant="ghost" onClick={showEarlier}>
-                    {t("conversation.earlier")}
-                  </Button>
-                ) : (
-                  <div ref={earlierMarker} className="py-1">
-                    {early === "loading" && (
-                      <div
-                        role="status"
-                        aria-label={t("common.loading")}
-                        className="skeleton h-4 w-2/5 rounded"
-                      />
-                    )}
-                  </div>
-                ))}
-              <Conversation
-                task={task}
-                items={items}
-                devices={all}
-                saying={saying}
-                onChange={changed}
-                onTakeOver={(id) => void takeOver(id)}
-                onEdit={(text) =>
-                  setDraft((d) => ({ text, seq: (d?.seq ?? 0) + 1 }))
-                }
-              />
+        <main className="flex min-h-0 flex-1 flex-col">
+          {/* Softened where it scrolls out of sight under the bar and above the
+              composer. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <Fade side="top" show={edges.above} />
+            <Fade side="bottom" show={edges.below} />
+            <div
+              ref={attachScroller}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                nearBottom.current =
+                  el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+                setSettled(true);
+              }}
+              className="scroll-quiet min-h-0 flex-1 overflow-y-auto"
+            >
+              <div className="mx-auto w-full max-w-[760px] space-y-4 px-4 pt-5 pb-6">
+                {task.permission_mode === "full" && !finished && (
+                  <p
+                    role="status"
+                    className="flex items-center gap-2 rounded-lg border border-amber/40 bg-amber-soft px-3 py-2 text-[13px] text-amber"
+                  >
+                    <Ico icon={ShieldOff} size={15} />
+                    {t("detail.fullOn")}
+                  </p>
+                )}
+                {error && <ErrorState message={error} />}
+                {task.earlier &&
+                  (early === "failed" ? (
+                    <Button variant="ghost" onClick={showEarlier}>
+                      {t("conversation.earlier")}
+                    </Button>
+                  ) : (
+                    <div ref={earlierMarker} className="py-1">
+                      {early === "loading" && (
+                        <div
+                          role="status"
+                          aria-label={t("common.loading")}
+                          className="skeleton h-4 w-2/5 rounded"
+                        />
+                      )}
+                    </div>
+                  ))}
+                <Conversation
+                  task={task}
+                  items={items}
+                  devices={all}
+                  saying={saying}
+                  onChange={changed}
+                  onTakeOver={(id) => void takeOver(id)}
+                  onEdit={(text) =>
+                    setDraft((d) => ({ text, seq: (d?.seq ?? 0) + 1 }))
+                  }
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="mx-auto w-full max-w-[760px] px-4 pb-[max(1.5rem,calc(env(safe-area-inset-bottom)+0.5rem))]">
-          {/* Only a task with a goal has one to show; most are a plain request. */}
-          {task.goal && (
-            <GoalBar task={task} onOpen={() => openPanel("goal")} />
-          )}
-          <TaskComposer
-            task={task}
-            draft={draft}
-            onChanged={changed}
-            onCommand={(command) =>
-              command === "side"
-                ? (tabs.newChat(), showPanel())
-                : setConfirm("stop")
-            }
-          />
-        </div>
+          <div className="mx-auto w-full max-w-[760px] px-4 pb-[max(1.5rem,calc(env(safe-area-inset-bottom)+0.5rem))]">
+            {/* Only a task with a goal has one to show; most are a plain request. */}
+            {task.goal && (
+              <GoalBar task={task} onOpen={() => openPanel("goal")} />
+            )}
+            <TaskComposer
+              task={task}
+              draft={draft}
+              onChanged={changed}
+              onCommand={(command) =>
+                command === "side"
+                  ? (tabs.newChat(), showPanel())
+                  : setConfirm("stop")
+              }
+            />
+          </div>
+        </main>
       </div>
 
       {/* Opens and closes by its width; the content keeps its own, so nothing

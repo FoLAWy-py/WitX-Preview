@@ -144,7 +144,7 @@ test("a task without phones starts with an empty side panel; a closed side chat 
   await page.getByRole("button", { name: "Open in the side panel" }).click();
   await page.getByRole("menuitem", { name: "Why this shop?" }).click();
   await expect(page.getByText("It is the cheapest.")).toBeVisible();
-  await page.getByRole("button", { name: "Close Why this shop?" }).click();
+  await page.getByTitle("Close Why this shop?").click();
   await expect(page.getByRole("tab")).toHaveCount(0);
   await page.getByRole("button", { name: "Open in the side panel" }).click();
   await expect(
@@ -205,6 +205,31 @@ test("the goal pauses from its tab, and many tabs can all be found in one list",
   await expect(
     page.getByRole("tab", { name: "Question number 5" }),
   ).toHaveAttribute("aria-selected", "true");
+});
+
+test("Delete on a tab closes it and moves focus to the tab shown next", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  await page.route("**/api/v1/tasks/t1/side-chat", (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "witx.panel.t1",
+      JSON.stringify({ tabs: ["phone", "goal"], active: "goal" }),
+    ),
+  );
+  await page.goto("/sign-in");
+  await page.getByLabel("Developer token").fill("dev-token");
+  await page.getByRole("button", { name: "Sign in with token" }).click();
+  await openTask(page);
+
+  const panel = page.getByRole("tablist", { name: "Side panel" });
+  await panel.getByRole("tab", { name: "Goal" }).focus();
+  await page.keyboard.press("Delete");
+  await expect(panel.getByRole("tab")).toHaveCount(1);
+  await expect(panel.getByRole("tab")).toBeFocused();
 });
 
 test("the goal tab shows the agent's plan and what it wrote down", async ({

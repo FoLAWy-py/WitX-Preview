@@ -29,7 +29,7 @@ import { useAsync } from "@/lib/useAsync";
 import { byPool, takeoverable } from "@/lib/pool";
 import { useWorkspace } from "@/lib/workspace";
 import { PageBar } from "@/components/Shell";
-import { Takeover } from "@/components/Takeover";
+import { loadTakeover, Takeover } from "@/components/takeover/lazy";
 import {
   Button,
   Card,
@@ -180,6 +180,7 @@ function TakeOverButton({ device }: { device: DeviceView }) {
       navigate(`/tasks/${device.task_id}?takeover=${device.id}`);
       return;
     }
+    loadTakeover().catch(() => {}); // shown as the takeover opens, if still missing
     setBusy(true);
     setError(undefined);
     try {

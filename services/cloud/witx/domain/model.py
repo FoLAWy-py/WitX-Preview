@@ -124,7 +124,7 @@ PAYMENT_EFFECTS = frozenset({"payment"})
 AUTO_ASK_EFFECTS = frozenset({"payment", "delete_data", "share_data", "account_change"})
 # Typed text that points at money; a phone number or address in a message does not.
 MONEY_FLAGS = frozenset({"money", "card_number"})
-# What a message or a payment is about . The agent declares it with the
+# What a message or a payment is about. The agent declares it with the
 # input, the risk check reads it from the screenshot, and the approval is bound to it.
 INTENT_FIELDS: dict[str, tuple[str, ...]] = {
     "send_message": ("recipient", "body"),
@@ -199,7 +199,7 @@ class RiskVerdict:
 
 @dataclass(frozen=True)
 class GoalVerdict:
-    """Whether the task's goal, a condition to be met, holds now : "met", "not_met"
+    """Whether the task's goal, a condition to be met, holds now: "met", "not_met"
     (``reason`` says what is missing, as guidance for the agent) or "impossible" (it can
     never hold; ``reason`` says why)."""
 
@@ -218,7 +218,7 @@ class Policy:
     risk: RiskVerdict | None
     app_sensitive: bool
     text_flags: list[str]
-    # launch_app of an app that find_app returned: its place in that search (0 = best).
+    # launch_app of an app that a search returned: its place in it (0 = best; by query, 0).
     found_rank: int | None = None
 
 
@@ -395,7 +395,7 @@ class Approval:
 
 @dataclass(frozen=True)
 class Grant:
-    """A person's approval of one held input "and the same kind" : later
+    """A person's approval of one held input "and the same kind": later
     inputs of the task on the same device and app, with the same effects and terms (see
     rules.grant_scope), are approved without asking, a limited number of times."""
 
@@ -431,7 +431,7 @@ class PurchaseOption:
 
 @dataclass(frozen=True)
 class PurchaseIntent:
-    """One purchase goal in a task that uses several phones . The person
+    """One purchase goal in a task that uses several phones. The person
     chooses one option; only that phone may order or pay for it, on its terms."""
 
     id: UUID

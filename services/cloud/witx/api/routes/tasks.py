@@ -283,6 +283,7 @@ def routes(d: Deps) -> APIRouter:
                     user_id=who.user_id,
                     text=body.text,
                     run_id=body.run_id,
+                    resume_paused=body.resume,
                 )
                 return await views.task_detail(conn, task)
 

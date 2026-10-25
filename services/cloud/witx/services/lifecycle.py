@@ -299,12 +299,14 @@ async def add_input(
     resume_finished: bool = True,
     run_id: UUID | None = None,
     system: bool = False,
+    resume_paused: bool = False,
 ) -> Task:
     """Adds a message from the user to the conversation; the main agent reads it on its
     next step. ``/goal …`` also sets the task's goal (the title stays). A message to a
     finished or stopped task resumes it with a new root run, unless it only records a
     change (``resume_finished`` false: it waits for the person's next message); on a
-    paused task it waits for resume.
+    paused task it waits for resume, or with ``resume_paused`` resumes it as a chat does.
+    A resume that is refused refuses the message too: nothing is left to send twice.
 
     ``run_id`` names a sub-agent: the message goes to it alone and wakes only it, as an
     answer to its question; commands are not read in it. Once that sub-agent has
@@ -332,6 +334,8 @@ async def add_input(
         await tasks.emit(conn, task, "input.added", seq=seq, kind=kind, run_id=target.id)
         if task.status == TaskStatus.ACTIVE:
             await runs.wake(conn, target.id, (WaitReason.USER_INPUT, WaitReason.MODEL_RETRY))
+        elif resume_paused and task.status == TaskStatus.PAUSED:
+            return await resume(conn, task.id)
         updated = await tasks.get(conn, task.id)
         assert updated is not None
         return updated
@@ -387,6 +391,8 @@ async def add_input(
         pass  # kept for the agent; resuming the task, or the next message, wakes it
     else:
         await _resume(conn, task, goal or task.goal or task.request)
+    if resume_paused and task.status == TaskStatus.PAUSED:
+        return await resume(conn, task.id)
     updated = await tasks.get(conn, task.id)
     assert updated is not None
     return updated

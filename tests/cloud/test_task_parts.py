@@ -27,7 +27,7 @@ async def rig(db: Database, admin_db: Database, tmp_path: Path) -> Rig:
 
 @pytest.fixture(autouse=True)
 def one_round_a_part(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rules, "PART_ROUNDS", 1)
+    monkeypatch.setattr(rules.tasks, "PART_ROUNDS", 1)
 
 
 def tap(request: Any, device: str, n: int) -> list[dict[str, Any]]:

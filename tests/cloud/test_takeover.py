@@ -1,4 +1,4 @@
-"""A person taking over a device of a paused task ."""
+"""A person taking over a device of a paused task."""
 
 import asyncio
 import json
@@ -14,7 +14,7 @@ from witx.domain.model import Lease, Task, TaskStatus
 from witx.domain.rules import Rejected
 from witx.services import lifecycle, takeover
 from witx.services.identity import Actor
-from witx.store import devices
+from witx.store import devices, tasks
 from witx.store.db import Database, execute, fetch
 from witx_contracts import gateway as wire
 
@@ -407,6 +407,33 @@ async def test_the_task_resumes_only_after_the_takeover_when_asked(rig: Rig) -> 
     await browser.next("frame")
     await browser.end(resume=True)
     assert (await rig.task(task.id)).status == TaskStatus.ACTIVE
+
+
+async def test_a_message_that_resumes_a_paused_task_is_added_only_if_the_task_resumes(
+    rig: Rig,
+) -> None:
+    task = await paused(rig)
+    lease = await start(rig, task)
+
+    async def send() -> Task:
+        async with rig.db.tenant(rig.tenant.id) as conn:
+            return await lifecycle.add_input(
+                conn, task_id=task.id, user_id=rig.tenant.user_id, text="go on", resume_paused=True
+            )
+
+    async def sent() -> int:
+        async with rig.db.tenant(rig.tenant.id) as conn:
+            return [i["text"] for i in await tasks.inputs(conn, task.id)].count("go on")
+
+    with pytest.raises(Rejected) as error:
+        await send()
+    assert error.value.code == "takeover_active"
+    assert await sent() == 0  # nothing is left behind to send twice
+    browser = Browser(rig, lease.takeover_id)  # type: ignore[arg-type]
+    await browser.next("frame")
+    await browser.end(resume=False)
+    assert (await send()).status == TaskStatus.ACTIVE
+    assert await sent() == 1
 
 
 async def test_input_must_be_recent_in_order_and_a_persons_kind(rig: Rig) -> None:

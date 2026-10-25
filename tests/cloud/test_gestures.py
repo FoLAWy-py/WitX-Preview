@@ -159,10 +159,10 @@ def test_a_press_is_judged_like_a_tap(kind: str) -> None:
 
 def test_presses_on_the_same_row_count_as_the_same_input_when_going_in_circles() -> None:
     press = {"kind": "long_press", "x": 100, "y": 500, "duration_ms": 800}
-    assert rules._same_input(press, press | {"x": 400, "duration_ms": 1500})
-    assert not rules._same_input(press, press | {"y": 900})
+    assert rules.same_input(press, press | {"x": 400, "duration_ms": 1500})
+    assert not rules.same_input(press, press | {"y": 900})
     double = {"kind": "double_tap", "x": 100, "y": 500}
-    assert rules._same_input(double, double | {"x": 300})
+    assert rules.same_input(double, double | {"x": 300})
 
 
 def test_a_press_outside_the_screenshot_is_refused() -> None:

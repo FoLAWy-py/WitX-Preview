@@ -199,8 +199,20 @@ class Lock(Wire):
 
 
 class LaunchApp(Wire):
+    """Opens an app by its ID, or by ``query`` the best match among the installed apps,
+    found as FindApp finds them: one input instead of a search and then a launch."""
+
     kind: Literal["launch_app"] = "launch_app"
-    app_id: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_.\-]+$")
+    app_id: str | None = Field(
+        default=None, min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_.\-]+$"
+    )
+    query: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def _one(self) -> "LaunchApp":
+        if (self.app_id is None) == (self.query is None):
+            raise ValueError("give app_id or query, not both")
+        return self
 
 
 class FindApp(Wire):

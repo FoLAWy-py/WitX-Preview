@@ -50,8 +50,7 @@ export function MessageActions({
     setBusy(true);
     setError(undefined);
     try {
-      await api.addInput(task.id, { text: input.text });
-      if (task.status === "paused") await api.resume(task.id);
+      await api.addInput(task.id, { text: input.text, resume: true });
       await onChange();
     } catch (err) {
       setError((err as Error).message);

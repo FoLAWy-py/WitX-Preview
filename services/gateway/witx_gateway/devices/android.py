@@ -111,19 +111,30 @@ class AndroidDevice(AppiumDevice):
     async def read_sliders(self) -> list[SliderReading]:
         return parse_android_sliders(str(await self._session_call("GET", "/source") or ""))
 
+    async def _password(self, element_id: str) -> bool:
+        password = await self._session_call("GET", f"/element/{element_id}/attribute/password")
+        return str(password).lower() == "true"
+
     async def check_text_target(self, point: tuple[float, float] | None = None) -> None:
         element_id = await self._focused_element()
-        password = await self._session_call("GET", f"/element/{element_id}/attribute/password")
-        if str(password).lower() == "true" or _blank(await self.screenshot()):
+        if await self._password(element_id) or _blank(await self.screenshot()):
             raise DeviceError("secure_field")
         await self._check_field_at(element_id, point)
 
     async def type_text(
-        self, text: str, *, replace: bool = False, method: TypeMethod = "set"
+        self, text: str, *, replace: bool = False, method: TypeMethod = "set", person: bool = False
     ) -> str | None:
         # "set" pastes here too: typing in key by key loses characters.
-        element_id = await self._focused_element()  # never type without a focused field
-        before = await self._field_text(element_id)
+        # Read again just before the agent types: the focus can move to a password field
+        # after ``check_text_target`` (a form going on). A person taking over may type one.
+        # What fails while it only reads has typed nothing, and says why instead of raising.
+        try:
+            element_id = await self._focused_element()  # never type without a focused field
+            if not person and await self._password(element_id):
+                return "secure_field"
+            before = await self._field_text(element_id)
+        except DeviceError as error:
+            return error.reason
         if replace:
             # Select all, so that the paste replaces it in one edit. Clearing the element
             # first (UiAutomator2's clear) races the paste in a web page's field.
@@ -146,8 +157,7 @@ class AndroidDevice(AppiumDevice):
 
     async def read_text_field(self, typed: str = "") -> TextField:
         element_id = await self._focused_element()
-        password = await self._session_call("GET", f"/element/{element_id}/attribute/password")
-        if str(password).lower() == "true":
+        if await self._password(element_id):
             raise DeviceError("secure_field")
         text = await self._field_text(element_id)
         return TextField(

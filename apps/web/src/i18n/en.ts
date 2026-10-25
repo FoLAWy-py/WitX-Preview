@@ -327,6 +327,8 @@ const en = {
     "It kept doing the same thing and stopped. Tell it how to go on.",
   "question.stopped.unconfirmed":
     "Its result kept disagreeing with the screen, so it stopped. Tell it what is true, or how to go on.",
+  "question.stopped.stepFailed":
+    "A step kept failing to finish, so it stopped. Tell it to try again.",
   "question.stopped.modelError":
     "The model failed and it stopped. Tell it to try again, or change the model.",
   "question.stopped.other": "It is waiting for you. Tell it how to go on.",
@@ -674,6 +676,7 @@ const en = {
   "timeline.sys.goal": "Goal updated: {goal}",
   "timeline.sys.model": "Switched to {name} from the next step",
   "timeline.sys.modelError": "The model call failed ({code})",
+  "timeline.sys.stepFailed": "A step kept failing to finish",
   "timeline.sys.modelRetry": "The model call failed ({code}); trying again",
   "timeline.sys.modelFallback":
     "{previous} kept failing ({code}): switched to {name}",

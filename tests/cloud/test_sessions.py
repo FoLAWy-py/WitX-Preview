@@ -1,5 +1,6 @@
-"""Browser sign-in : session cookies, CSRF, and the backend OIDC flow."""
+"""Browser sign-in: session cookies, CSRF, and the backend OIDC flow."""
 
+import argparse
 import asyncio
 import base64
 import contextlib
@@ -19,6 +20,7 @@ import uvicorn
 import websockets
 from joserfc import jwt
 from joserfc.jwk import KeySet, RSAKey
+from witx import cli
 from witx.api.app import create_app
 from witx.api.auth import DevAuthenticator, OidcLogin
 from witx.config import Settings
@@ -255,3 +257,16 @@ async def test_the_takeover_socket_admits_browsers_only_from_our_pages(system) -
         server.should_exit = True
         with contextlib.suppress(Exception):
             await serving
+
+
+@pytest.mark.parametrize("auth", [None, "OIDC"])
+def test_the_api_does_not_start_unless_how_people_sign_in_is_chosen(
+    monkeypatch: pytest.MonkeyPatch, auth: str | None
+) -> None:
+    monkeypatch.setenv("WITX_DATABASE_URL", "postgresql://x/y")
+    if auth is None:
+        monkeypatch.delenv("WITX_AUTH", raising=False)
+    else:
+        monkeypatch.setenv("WITX_AUTH", auth)  # misspelt: not taken for dev
+    with pytest.raises(SystemExit, match="WITX_AUTH"):
+        cli._serve_api(argparse.Namespace(host="127.0.0.1", port=0))

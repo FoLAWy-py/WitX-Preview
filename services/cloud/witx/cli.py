@@ -49,7 +49,10 @@ from witx.worker import (
 
 
 def _authenticator(settings: Settings) -> Authenticator:
-    """Checks the bearer tokens of programs (browsers use session cookies)."""
+    """Checks the bearer tokens of programs (browsers use session cookies). How people
+    sign in is chosen, never fallen into: a missing or misspelt WITX_AUTH would be dev."""
+    if settings.auth not in ("dev", "oidc"):
+        sys.exit("WITX_AUTH must be oidc, or dev (fixed tokens) for trying WitX out")
     if settings.auth == "oidc":
         assert settings.oidc_issuer, "WITX_OIDC_ISSUER is required"
         if not (settings.oidc_audience and settings.oidc_jwks_url):
@@ -134,7 +137,7 @@ def _decisions(settings: Settings) -> dict[str, Any]:
 
 
 async def _check() -> int:
-    """What a worker needs to do its work : the API's checks plus each model
+    """What a worker needs to do its work: the API's checks plus each model
     of the catalog, through the provider's free model list (no inference)."""
     settings = Settings.from_env()
     db = Database(settings.database_url)

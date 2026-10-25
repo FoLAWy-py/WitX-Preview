@@ -202,6 +202,49 @@ async def test_the_model_can_look_at_an_earlier_screenshot_again_for_one_turn(ri
     assert str(rig.model.requests[4].input).count("image_url") == 1
 
 
+async def test_a_summary_in_another_language_than_the_request_is_sent_back(rig: Rig) -> None:
+    rig.model.script = [
+        [
+            call(
+                "complete_task",
+                summary="今天是二零二六年十月二十五日，星期日。",
+                evidence_observation_ids=[],
+            )
+        ],
+        [
+            call(
+                "complete_task",
+                summary="Today is Sunday, 25 October 2026.",
+                evidence_observation_ids=[],
+            )
+        ],
+    ]
+    task = await rig.create_task("Find out what day it is.", device_ids=[])
+    await rig.settle()
+
+    first, _ = await rig.outputs(task.id)
+    assert first["status"] == "rejected" and first["code"] == "wrong_language"
+    done = await rig.task(task.id)
+    assert done.status == TaskStatus.COMPLETED
+    assert done.result is not None and done.result["summary"] == "Today is Sunday, 25 October 2026."
+
+
+async def test_a_summary_is_sent_back_for_its_language_only_once(rig: Rig) -> None:
+    chinese = [
+        call(
+            "complete_task",
+            summary="今天是二零二六年十月二十五日，星期日。",
+            evidence_observation_ids=[],
+        )
+    ]
+    rig.model.script = [chinese, chinese]
+    task = await rig.create_task("Find out what day it is.", device_ids=[])
+    await rig.settle()
+
+    done = await rig.task(task.id)
+    assert done.status == TaskStatus.COMPLETED  # not held forever on its language
+
+
 async def test_only_this_task_s_screenshots_can_be_looked_at_again(rig: Rig) -> None:
     rig.model.script = [
         [call("view_screenshot", observation_id=str(uuid4()))],
@@ -1149,6 +1192,22 @@ async def test_typing_by_keys_that_stopped_short_says_why_and_what_went_in(rig: 
     assert "no candidate" in typed["note"]
 
 
+async def test_a_field_gone_before_anything_was_typed_is_told_as_nothing_typed(rig: Rig) -> None:
+    device = await typing_device(rig)
+    rig.gateway.type_problem = "no_focused_field"  # the field closed after the Gateway's check
+    rig.gateway.field_read = False
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        lambda r: type_into_field(r, device),
+        complete,
+    ]
+    task = await rig.create_task("Comment on the post")
+    await rig.settle()
+    (typed,) = [o for o in await rig.outputs(task.id) if o["name"] == "type_text"]
+    assert (typed["effect"], typed["reason"]) == ("unverified", "no_focused_field")
+    assert typed["note"].startswith("Nothing was typed")
+
+
 def test_the_risk_check_is_told_the_text_replaces_what_the_field_holds() -> None:
     typed = {"kind": "type_text", "text": "Ann"}
     assert describe_input(typed | {"replace": True}).startswith("replace all text")
@@ -1296,6 +1355,22 @@ async def test_an_option_the_phone_did_not_find_is_reported_without_a_tap(rig: R
     (chosen,) = [o for o in await rig.outputs(task.id) if o["name"] == "select_option"]
     assert chosen["reason"] == "not_found" and "selected" not in chosen
     assert "No option shows exactly that text" in chosen["note"]
+
+
+async def test_a_list_that_could_not_be_read_before_scrolling_is_not_said_to_be_scrolled(
+    rig: Rig,
+) -> None:
+    device = await selecting_device(rig)
+    rig.gateway.select_problem = "session_lost"  # lost before the first swipe: nothing touched
+    rig.model.script = [
+        [call("observe", device_id=device)],
+        lambda r: select_option_call(r, device),
+        complete,
+    ]
+    task = await rig.create_task("Choose China +86 as the country code")
+    await rig.settle()
+    (chosen,) = [o for o in await rig.outputs(task.id) if o["name"] == "select_option"]
+    assert chosen["reason"] == "session_lost" and "scrolled" not in chosen["note"]
 
 
 async def test_an_option_with_an_effect_is_not_chosen_by_its_text(rig: Rig) -> None:

@@ -1,15 +1,11 @@
 import {
   Fragment,
   useEffect,
-  useEffectEvent,
-  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
-  type PointerEvent,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -34,29 +30,31 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import type {
-  DeviceView,
-  TakeoverEnded,
-  TakeoverFrame,
-  TakeoverInputResult,
-  TakeoverView,
-} from "@/api/types.gen";
-import { useI18n, type MessageKey, type Translate } from "@/i18n";
-import { useAuth } from "@/lib/auth";
-import { base64Bytes } from "@/lib/frame";
+import type { DeviceView, TakeoverView } from "@/api/types.gen";
+import { useI18n, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/format";
 import { newId } from "@/lib/id";
 import { useLayout } from "@/lib/prefs";
-import { gestureOf, sameGeometry, TAP_SLOP, wheelSwipeOf } from "@/lib/gesture";
-import { fitScreen, KEY_ROOM, type Box, type Fitted } from "@/lib/screen";
-import { sample, type TrailPoint } from "@/lib/trail";
+import { fitScreen } from "@/lib/screen";
+import {
+  Frame,
+  KEY_SHORTCUT,
+  keyState,
+  SIDE_KEYS,
+  SideKey,
+  StatusChip,
+  Toast,
+  useBoxSize,
+  why,
+  type Mark,
+  type Recent,
+  type SideKind,
+} from "./takeover/parts";
+import { useScreen, type Point } from "./takeover/screen";
+import { useTakeoverSocket } from "./takeover/socket";
 import { Button, Ico, inputClass } from "./ui/base";
 import { Menu } from "./ui/popover";
 
-/** The trail of a drag on the picture: its width in page pixels, and its colour when the
- * page's accent cannot be read. */
-const TRAIL_WIDTH = 3;
-const TRAIL_FALLBACK = "#4f46e5";
 /** A picture older than this says so: the phone sends one at least every second,
  * so a longer wait means the network or the phone is slow, and input would land on a
  * screen the person has not seen. */
@@ -66,8 +64,6 @@ const RECENT = 6;
 /** The shape of a phone's screen, for the frame shown before the first picture. */
 const PLACEHOLDER = { width: 1080, height: 2340 };
 
-type Point = { x: number; y: number };
-type SideKind = "volume_up" | "volume_down" | "lock";
 type Mode = "inline" | "phone" | "phoneSide" | "wide";
 
 /** Why a takeover ended, in words; unknown reasons are shown as sent. */
@@ -80,34 +76,12 @@ const ENDED: Record<string, MessageKey> = {
   device_locked: "takeover.ended.locked",
 };
 
-/** Where a phone's side keys are, as fractions of its height from the top: Android has
- * them all on the right, an iPhone its volume keys on the left. */
-const SIDE_KEYS: Record<
-  "android" | "ios",
-  { kind: SideKind; side: "left" | "right"; at: number; length: number }[]
-> = {
-  android: [
-    { kind: "lock", side: "right", at: 0.19, length: 0.075 },
-    { kind: "volume_up", side: "right", at: 0.31, length: 0.075 },
-    { kind: "volume_down", side: "right", at: 0.388, length: 0.075 },
-  ],
-  ios: [
-    { kind: "volume_up", side: "left", at: 0.2, length: 0.07 },
-    { kind: "volume_down", side: "left", at: 0.285, length: 0.07 },
-    { kind: "lock", side: "right", at: 0.24, length: 0.115 },
-  ],
-};
 /** Product names, as written: not translated. */
 const PLATFORM: Record<string, string> = { android: "Android", ios: "iOS" };
 const KEY_ICON: Record<SideKind, LucideIcon> = {
   volume_up: Volume2,
   volume_down: Volume1,
   lock: Lock,
-};
-const KEY_SHORTCUT: Record<SideKind, string> = {
-  volume_up: "Alt ↑",
-  volume_down: "Alt ↓",
-  lock: "Alt L",
 };
 
 /**
@@ -141,35 +115,13 @@ export function Takeover({
   onClosed: () => void;
   onAgain?: () => void;
 }) {
-  const { api } = useAuth();
   const { t } = useI18n();
-  // The socket reads the words of the language shown now; switching it must not
-  // reconnect, which would end the takeover.
-  const tRef = useRef(t);
-  tRef.current = t;
   const { layout, coarse, landscapePhone } = useLayout();
-  const socket = useRef<WebSocket | null>(null);
   const seq = useRef(0);
-  const press = useRef<{
-    at: Point;
-    frame: TakeoverFrame;
-    start: number; // the press's timeStamp; the trail's times are relative to it
-    trail: TrailPoint[]; // where the pointer has been, in pixels of `frame`
-  } | null>(null);
   const image = useRef<HTMLCanvasElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const room = useRef<HTMLDivElement>(null);
   const roomSize = useBoxSize(room);
-  // `frame` changes only when the picture's size does (and for the first one): the
-  // pictures themselves are drawn straight onto the canvas, not through React.
-  const [frame, setFrame] = useState<TakeoverFrame>();
-  // The picture on the canvas: input refers to it by frame_id.
-  const frameRef = useRef<TakeoverFrame>(undefined);
-  const bitmap = useRef<ImageBitmap>(undefined);
-  // The newest picture that arrived while one was being decoded; older ones are skipped.
-  const waiting = useRef<TakeoverFrame>(undefined);
-  const decoding = useRef(false);
-  const lastPicture = useRef(Date.now());
   const [ended, setEnded] = useState<string>();
   const [note, setNote] = useState<string>();
   const [text, setText] = useState("");
@@ -197,114 +149,49 @@ export function Takeover({
   const can = (kind: string) => device?.capabilities.includes(kind as never);
   const sideKeys = (["volume_up", "volume_down", "lock"] as const).filter(can);
 
-  /** Draws the picture once it is decoded. Decoding happens off the page's main thread;
-   * a picture that arrives meanwhile replaces the one waiting, so the screen never falls
-   * behind the phone. */
-  async function show(message: TakeoverFrame) {
-    waiting.current = message;
-    if (decoding.current) return;
-    decoding.current = true;
-    try {
-      while (waiting.current) {
-        const next = waiting.current;
-        waiting.current = undefined;
-        try {
-          const decoded = await createImageBitmap(
-            new Blob([base64Bytes(next.jpeg)], { type: "image/jpeg" }),
-          );
-          bitmap.current?.close();
-          bitmap.current = decoded;
-        } catch {
-          continue; // a picture that cannot be decoded is skipped
-        }
-        frameRef.current = next;
-        lastPicture.current = Date.now();
-        paint();
-        setFrame((shown) =>
-          shown && shown.width === next.width && shown.height === next.height
-            ? shown
-            : next,
-        );
-      }
-    } finally {
-      decoding.current = false;
-    }
-  }
+  const picture = useScreen({
+    canvas: image,
+    ended: ended !== undefined,
+    send,
+    pressed: mark,
+    turned: () =>
+      setNote(t("takeover.notDone", { why: t("takeover.why.turned") })),
+  });
+  const { frame, shown, lastPicture } = picture;
+  const { onPointerDown, onPointerMove, onPointerUp } = picture.pointer;
 
-  /** Draws the picture, and over it the trail of a drag still under way. A drag that
-   * ended leaves its trail on the picture until the next one is drawn. */
-  function paint() {
-    const canvas = image.current;
-    const picture = bitmap.current;
-    const shown = frameRef.current;
-    if (!canvas || !picture || !shown) return;
-    if (canvas.width !== shown.width) canvas.width = shown.width;
-    if (canvas.height !== shown.height) canvas.height = shown.height;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    context.drawImage(picture, 0, 0, canvas.width, canvas.height);
-    const trail = press.current?.trail;
-    if (trail && trail.length > 1) drawTrail(canvas, context, trail);
-  }
-
-  // The canvas appears with the first picture, and is cleared when its size changes.
-  useLayoutEffect(paint, [frame]);
-
-  useEffect(() => {
-    // The server ends a takeover when its socket closes, so a socket opened and closed
-    // at once (React mounts twice in development) would end it: connect a tick later.
-    let ws: WebSocket | undefined;
-    const timer = setTimeout(() => {
-      // The session cookie signs the socket in; nothing to send first.
-      ws = new WebSocket(api.takeoverSocketUrl(takeover.takeover_id));
-      socket.current = ws;
-      ws.onmessage = (event: MessageEvent<string>) => {
-        const message = JSON.parse(event.data) as
-          | TakeoverFrame
-          | TakeoverInputResult
-          | TakeoverEnded;
-        if (message.type === "frame") {
-          void show(message);
-        } else if (message.type === "input_result") {
-          const state: Recent["state"] =
-            message.outcome === "returned"
-              ? "done"
-              : message.outcome === "unknown"
-                ? "unknown"
-                : "failed";
-          setMarks((all) =>
-            all.map((m) =>
-              m.input === message.input_id
-                ? { ...m, state: state === "done" ? "done" : "failed" }
-                : m,
-            ),
-          );
-          setRecent((all) =>
-            all.map((r) => {
-              if (r.id !== message.input_id) return r;
-              if (r.kind === "lock" && state === "done") locked.current = true;
-              return {
-                ...r,
-                state,
-                why: state === "done" ? undefined : why(message, tRef.current),
-              };
-            }),
-          );
-          setNote(state === "done" ? undefined : why(message, tRef.current));
-        } else if (message.type === "ended") setEnded(message.reason);
-      };
-      ws.onclose = () => setEnded((reason) => reason ?? "disconnected");
-    });
-    return () => {
-      clearTimeout(timer);
-      if (ws) {
-        // Detach first: a socket closed by this cleanup must not end the takeover shown.
-        ws.onmessage = null;
-        ws.onclose = null;
-        ws.close();
-      }
-    };
-  }, [api, takeover.takeover_id]);
+  const socket = useTakeoverSocket(takeover.takeover_id, {
+    frame: (message) => void picture.show(message),
+    result: (message) => {
+      const state: Recent["state"] =
+        message.outcome === "returned"
+          ? "done"
+          : message.outcome === "unknown"
+            ? "unknown"
+            : "failed";
+      setMarks((all) =>
+        all.map((m) =>
+          m.input === message.input_id
+            ? { ...m, state: state === "done" ? "done" : "failed" }
+            : m,
+        ),
+      );
+      setRecent((all) =>
+        all.map((r) => {
+          if (r.id !== message.input_id) return r;
+          if (r.kind === "lock" && state === "done") locked.current = true;
+          return {
+            ...r,
+            state,
+            why: state === "done" ? undefined : why(message, t),
+          };
+        }),
+      );
+      setNote(state === "done" ? undefined : why(message, t));
+    },
+    ended: setEnded,
+    closed: () => setEnded((reason) => reason ?? "disconnected"),
+  });
 
   useEffect(() => {
     if (inline) return;
@@ -331,15 +218,13 @@ export function Takeover({
     seq.current += 1;
     const id = newId();
     lastActive.current = Date.now();
-    socket.current?.send(
-      JSON.stringify({
-        type: "input",
-        input_id: id,
-        client_seq: seq.current,
-        frame_id: frameId,
-        input,
-      }),
-    );
+    socket.send({
+      type: "input",
+      input_id: id,
+      client_seq: seq.current,
+      frame_id: frameId,
+      input,
+    });
     // The kind, and for typing only how much: what was typed is not kept, even here.
     const kind = String(input.kind);
     const chars = kind === "type_text" ? String(input.text).length : undefined;
@@ -352,14 +237,14 @@ export function Takeover({
 
   /** A key of the phone: its system buttons and its side keys. */
   function key(kind: "back" | "home" | SideKind) {
-    const shown = frameRef.current;
-    if (!shown || ended) return;
+    const on = shown.current;
+    if (!on || ended) return;
     if (kind === "lock" && !confirmLock) {
       setConfirmLock(true); // locking ends the takeover: asked first
       return;
     }
     setConfirmLock(false);
-    send({ kind }, shown.frame_id);
+    send({ kind }, on.frame_id);
   }
 
   /** Shows at once where a press landed; its result colours it, then it goes. Kept by
@@ -376,129 +261,21 @@ export function Takeover({
     setTimeout(() => setMarks((all) => all.filter((m) => m.id !== id)), 1600);
   }
 
-  /** Page coordinates on the picture -> pixels of the frame it shows. */
-  function toFrame(page: Point, shown: TakeoverFrame): Point {
-    const el = image.current!;
-    const box = el.getBoundingClientRect();
-    const left = box.left + el.clientLeft;
-    const top = box.top + el.clientTop;
-    return {
-      x: Math.round(((page.x - left) * shown.width) / el.clientWidth),
-      y: Math.round(((page.y - top) * shown.height) / el.clientHeight),
-    };
-  }
-
-  function onPointerDown(event: PointerEvent) {
-    const shown = frameRef.current;
-    if (!shown || ended) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const at = { x: event.clientX, y: event.clientY };
-    press.current = {
-      at,
-      frame: shown,
-      start: event.timeStamp,
-      trail: [{ ...toFrame(at, shown), t_ms: 0 }],
-    };
-  }
-
-  /** While pressed, the pointer's way is kept (one point every SAMPLE_MS or so) and drawn. */
-  function onPointerMove(event: PointerEvent) {
-    const started = press.current;
-    if (!started) return;
-    const here = toFrame({ x: event.clientX, y: event.clientY }, started.frame);
-    const t_ms = Math.round(event.timeStamp - started.start);
-    if (sample(started.trail, { ...here, t_ms })) paint();
-  }
-
-  /** A gesture is sent against the newest picture, not the one it began on: a slow drag
-   * outlives the frames the server keeps. Its coordinates are still those of the
-   * picture it began on, which is the same thing while the screen's geometry is the
-   * same; a phone turned round meanwhile makes them wrong, so then nothing is sent and
-   * the person is asked to drag again. */
-  function onPointerUp(event: PointerEvent) {
-    const started = press.current;
-    if (!started) return;
-    const from = toFrame(started.at, started.frame);
-    const to = toFrame({ x: event.clientX, y: event.clientY }, started.frame);
-    const moved = Math.hypot(
-      event.clientX - started.at.x,
-      event.clientY - started.at.y,
-    );
-    const held = Math.round(event.timeStamp - started.start);
-    const shown = frameRef.current ?? started.frame;
-    if (!sameGeometry(shown, started.frame)) {
-      press.current = null;
-      paint(); // the trail of a drag that is not sent goes
-      setNote(t("takeover.notDone", { why: t("takeover.why.turned") }));
-      return;
-    }
-    const gesture = gestureOf({
-      from,
-      to,
-      moved,
-      held,
-      trail: started.trail,
-      size: started.frame,
-    });
-    if (moved >= TAP_SLOP) {
-      // The whole way, to where it was let go, stays on the picture until the next one.
-      started.trail.push({ ...to, t_ms: held });
-      paint();
-    }
-    press.current = null;
-    mark(started.at, send(gesture, shown.frame_id));
-  }
-
-  // The mouse wheel scrolls the phone: the turns of one gesture become one swipe, the
-  // way a finger would move (wheel down: the finger goes up).
-  const wheelSwipe = useEffectEvent((total: number, at: Point) => {
-    const shown = frameRef.current;
-    const el = image.current;
-    if (!shown || !el || !total) return;
-    send(
-      wheelSwipeOf(total, toFrame(at, shown), shown, el.clientHeight),
-      shown.frame_id,
-    );
-  });
-  const showing = frame !== undefined;
-  useEffect(() => {
-    const el = image.current;
-    if (!el || !showing || ended) return;
-    let total = 0;
-    let at: Point = { x: 0, y: 0 };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const wheel = (e: WheelEvent) => {
-      e.preventDefault();
-      total += e.deltaY;
-      at = { x: e.clientX, y: e.clientY };
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        wheelSwipe(total, at);
-        total = 0;
-      }, 120);
-    };
-    el.addEventListener("wheel", wheel, { passive: false });
-    return () => {
-      el.removeEventListener("wheel", wheel);
-      clearTimeout(timer);
-    };
-  }, [showing, ended]);
-
   function typeText(event: FormEvent) {
     event.preventDefault();
-    const shown = frameRef.current;
-    if (!text || !shown) return;
-    send({ kind: "type_text", text }, shown.frame_id);
+    const on = shown.current;
+    if (!text || !on) return;
+    send({ kind: "type_text", text }, on.frame_id);
     setText("");
   }
 
   function keep() {
     lastActive.current = Date.now();
-    socket.current?.send(JSON.stringify({ type: "keep" }));
+    socket.send({ type: "keep" });
   }
 
   function finish(resume: boolean) {
-    socket.current?.send(JSON.stringify({ type: "end", resume }));
+    socket.send({ type: "end", resume });
   }
 
   /** The side keys from the keyboard, anywhere in the takeover but a text field:
@@ -1007,10 +784,7 @@ export function Takeover({
 
   // Leaving ends a running takeover first (the phone is freed, or its task stays
   // paused). Ended or not yet connected: close; closing the socket ends it too.
-  const leave = () =>
-    !ended && socket.current?.readyState === WebSocket.OPEN
-      ? finish(false)
-      : onClosed();
+  const leave = () => (!ended && socket.open() ? finish(false) : onClosed());
   const leaveButton = (
     <Button
       variant="ghost"
@@ -1343,267 +1117,3 @@ const HOW_ICON: Partial<Record<MessageKey, LucideIcon>> = {
   "takeover.how.wheel": ChevronDown,
   "takeover.how.keys": Volume2,
 };
-
-/** A key on the phone's edge, where it is on the phone. It is wider than it looks, so a
- * pointer finds it, and stands out a little from the frame like the real one. */
-function SideKey({
-  spec,
-  fit,
-  coarse,
-  label,
-  state,
-  disabled,
-  onPress,
-}: {
-  spec: (typeof SIDE_KEYS)["android"][number];
-  fit: Fitted;
-  coarse: boolean;
-  label: string;
-  state: "idle" | "sent" | "failed";
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  const outerWidth = fit.width + 2 * fit.bezel;
-  const outerHeight = fit.height + 2 * fit.bezel;
-  const length = Math.round(outerHeight * spec.length);
-  const hitLength = Math.max(length, coarse ? 44 : 24);
-  const hitWidth = coarse ? KEY_ROOM + 12 : KEY_ROOM + 2;
-  const right = spec.side === "right";
-  const bar = fit.bezel >= 9 ? 5 : 4;
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={`${label} (${KEY_SHORTCUT[spec.kind]})`}
-      disabled={disabled}
-      onClick={onPress}
-      className="group absolute z-[1] disabled:cursor-not-allowed"
-      style={{
-        top: Math.round(outerHeight * spec.at + length / 2 - hitLength / 2),
-        left: right ? outerWidth - 3 : -(hitWidth - 3),
-        width: hitWidth,
-        height: hitLength,
-      }}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "absolute transition-[background-color,translate] duration-100",
-          state === "sent"
-            ? "bg-accent"
-            : state === "failed"
-              ? "bg-amber"
-              : "bg-[#2c2e34] group-hover:bg-[#4a4d57] group-active:bg-accent group-disabled:bg-[#2c2e34] dark:bg-[#4a4d57] dark:group-hover:bg-[#6b6f78] dark:group-disabled:bg-[#4a4d57]",
-          right ? "rounded-r-[3px]" : "rounded-l-[3px]",
-          state === "sent" && (right ? "-translate-x-px" : "translate-x-px"),
-        )}
-        style={{
-          top: (hitLength - length) / 2,
-          height: length,
-          width: bar,
-          [right ? "left" : "right"]: 0,
-          boxShadow:
-            "inset 0 1px 0 rgb(255 255 255 / 0.14), inset 0 -1px 0 rgb(0 0 0 / 0.4)",
-        }}
-      />
-    </button>
-  );
-}
-
-/** How a side key looks after its last press: pressed while it runs, amber for a moment
- * when it did not. */
-function keyState(
-  recent: Recent[],
-  kind: string,
-  now: number,
-): "idle" | "sent" | "failed" {
-  const last = recent.find((r) => r.kind === kind);
-  if (!last) return "idle";
-  if (last.state === "sent") return "sent";
-  if (last.state !== "done" && now - last.at < 3_000) return "failed";
-  return "idle";
-}
-
-function StatusChip({
-  tone,
-  label,
-}: {
-  tone: "live" | "connecting" | "delayed";
-  label: string;
-}) {
-  return (
-    <span className="inline-flex h-7 shrink-0 items-center gap-2 rounded-full bg-sunken px-2.5 text-[12.5px] font-medium whitespace-nowrap text-muted">
-      <span
-        aria-hidden
-        className={cn(
-          "h-[7px] w-[7px] rounded-full",
-          tone === "live"
-            ? "anim-pulse bg-accent"
-            : tone === "delayed"
-              ? "bg-amber"
-              : "bg-line-strong",
-        )}
-      />
-      {label}
-    </span>
-  );
-}
-
-/** A message over the picture: what needs the person now. White, with only its icon in
- * the colour that says so, to keep the picture the thing to look at. */
-function Toast({
-  icon,
-  action,
-  children,
-}: {
-  icon: LucideIcon;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      role="status"
-      className="elev anim-slide pointer-events-auto flex w-full max-w-[420px] items-center gap-2.5 rounded-xl border border-line bg-surface py-2 pr-2 pl-3 text-[13px]"
-    >
-      <Ico icon={icon} size={16} className="text-amber" />
-      <span className="min-w-0 flex-1">{children}</span>
-      {action}
-    </div>
-  );
-}
-
-/** The size of an element, as it changes. */
-function useBoxSize(ref: RefObject<HTMLElement | null>): Box {
-  const [size, setSize] = useState<Box>({ width: 0, height: 0 });
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () =>
-      setSize((old) =>
-        old.width === el.clientWidth && old.height === el.clientHeight
-          ? old
-          : { width: el.clientWidth, height: el.clientHeight },
-      );
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref]);
-  return size;
-}
-
-/** The way a drag has taken, on the picture: a line in the page's accent colour with a
- * light edge, so it shows on a dark screen and a light one alike. The picture's pixels
- * are larger than the page's, so the width is scaled to look the same at any size. */
-function drawTrail(
-  canvas: HTMLCanvasElement,
-  context: CanvasRenderingContext2D,
-  trail: TrailPoint[],
-) {
-  const scale = canvas.width / Math.max(1, canvas.clientWidth);
-  const accent =
-    getComputedStyle(canvas).getPropertyValue("--accent").trim() ||
-    TRAIL_FALLBACK;
-  context.save();
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.beginPath();
-  context.moveTo(trail[0].x, trail[0].y);
-  for (const point of trail.slice(1)) context.lineTo(point.x, point.y);
-  context.strokeStyle = "rgba(255, 255, 255, 0.85)";
-  context.lineWidth = (TRAIL_WIDTH + 2) * scale;
-  context.stroke();
-  context.strokeStyle = accent;
-  context.lineWidth = TRAIL_WIDTH * scale;
-  context.stroke();
-  context.restore();
-}
-
-/** A press shown on the picture: sent, then done or failed. */
-type Mark = {
-  id: string;
-  input: string;
-  x: number;
-  y: number;
-  state: "sent" | "done" | "failed";
-};
-
-/** An input in the list of recent ones: its kind (for typing, how many characters, never
- * which), and what came of it. */
-type Recent = {
-  id: string;
-  kind: string;
-  chars?: number;
-  at: number;
-  state: "sent" | "done" | "failed" | "unknown";
-  why?: string;
-};
-
-/** Why an input did not run, in the person's words. */
-function why(result: TakeoverInputResult, t: Translate): string {
-  const reason = result.reason ?? "";
-  const known: Record<string, MessageKey> = {
-    stale_frame: "takeover.why.stale",
-    out_of_order: "takeover.why.stale",
-    screen_changed: "takeover.why.screenChanged",
-    stale_epoch: "takeover.why.over",
-    stopped: "takeover.why.over",
-    out_of_bounds: "takeover.why.outside",
-    unsupported_input: "takeover.why.unsupported",
-    locked: "takeover.why.locked",
-    timeout: "takeover.why.slow",
-  };
-  const words = known[reason]
-    ? t(known[reason])
-    : t("takeover.why.other", { reason: reason.replace(/_/g, " ") || "?" });
-  return t(
-    result.outcome === "unknown" ? "takeover.notSure" : "takeover.notDone",
-    { why: words },
-  );
-}
-
-function Frame({
-  label,
-  inline,
-  row,
-  rootRef,
-  onKeyDown,
-  children,
-}: {
-  label: string;
-  inline?: boolean;
-  row?: boolean;
-  rootRef: RefObject<HTMLDivElement | null>;
-  onKeyDown: (event: KeyboardEvent) => void;
-  children: ReactNode;
-}) {
-  // Focusable, so the side keys' shortcuts work after a click on the picture. Full
-  // screen it lies over the navigation drawer (z 70) and under the sheets, dialogs and
-  // menus (z 80, 90) it opens itself, such as its menu of endings.
-  return inline ? (
-    <section
-      ref={rootRef}
-      aria-label={label}
-      tabIndex={-1}
-      onKeyDown={onKeyDown}
-      className="flex min-h-full flex-col bg-surface outline-none"
-    >
-      {children}
-    </section>
-  ) : (
-    <div
-      ref={rootRef}
-      role="dialog"
-      aria-modal
-      aria-label={label}
-      tabIndex={-1}
-      onKeyDown={onKeyDown}
-      className={cn(
-        "anim-fade fixed inset-0 z-[75] flex bg-bg pt-[env(safe-area-inset-top)] outline-none",
-        row ? "flex-row" : "flex-col",
-      )}
-    >
-      {children}
-    </div>
-  );
-}

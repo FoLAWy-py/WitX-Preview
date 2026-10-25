@@ -2,8 +2,9 @@
 # Install: copy to /etc/systemd/system/, adjust the paths and user, then
 #   sudo -u witx witx-gateway --config /etc/witx/gateway.toml enroll    # once
 #   systemctl enable --now witx-gateway
-# Without a desktop session there is no Secret Service: the credential is kept next to
-# the journal in /var/lib/witx (mode 0600).
+# /etc is read-only to the service: set journal = "/var/lib/witx/gateway.sqlite3" in
+# gateway.toml. Without a desktop session there is no Secret Service: the credential is
+# kept next to the journal in /var/lib/witx (mode 0600).
 [Unit]
 Description=WitX Gateway
 After=network-online.target

@@ -31,9 +31,8 @@ export function PlanCard({
     setBusy(true);
     setError(undefined);
     try {
-      await api.addInput(task.id, { text: "/plan approve" });
       // Like a message to a paused task: it carries on.
-      if (task.status === "paused") await api.resume(task.id);
+      await api.addInput(task.id, { text: "/plan approve", resume: true });
       await onChange();
     } catch (err) {
       setError((err as Error).message);

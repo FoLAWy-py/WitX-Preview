@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { mockApi } from "./fixtures/api";
-import { openTask } from "./fixtures/auth";
+import { detailOf, mockApi } from "./fixtures/api";
+import { openTask, signIn } from "./fixtures/auth";
+import { task } from "./fixtures/task";
 import { SCREEN_JPEG } from "./fixtures/media";
 import { takeoverWithPictures } from "./fixtures/takeover";
 
@@ -76,6 +77,38 @@ test("taking over pauses the task, taps where clicked and hands back", async ({
   await dialog.getByRole("button", { name: "Hand back and resume" }).click();
   await expect.poll(() => sent.at(-1)).toEqual({ type: "end", resume: true });
   await expect(dialog).toBeHidden();
+});
+
+test("leaving the page while the task is still pausing does not take the phone over", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  let status = "active";
+  let polled = 0;
+  await page.route(detailOf("t1"), (route) => {
+    polled += 1;
+    return route.fulfill({ json: { ...task, status } });
+  });
+  await page.route("**/api/v1/tasks/t1/pause", (route) => {
+    status = "pausing"; // the phone has not confirmed yet
+    return route.fulfill({ json: { ...task, status } });
+  });
+  const started: string[] = [];
+  await page.route("**/api/v1/tasks/t1/takeover", (route) => {
+    started.push(route.request().method());
+    return route.fallback();
+  });
+  await signIn(page);
+  await openTask(page);
+  await page.getByRole("button", { name: "Take over" }).click();
+  const before = polled;
+  await expect.poll(() => polled).toBeGreaterThan(before); // waiting for the pause
+
+  await page.getByRole("link", { name: "Scheduled" }).click();
+  await expect(page).toHaveURL(/\/schedules/);
+  status = "paused"; // the pause completes after the person left
+  await page.waitForTimeout(1500);
+  expect(started).toEqual([]);
 });
 
 test("a takeover that gets no picture from the phone ends saying it stopped responding", async ({

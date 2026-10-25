@@ -97,7 +97,7 @@ class Settings:
     deepinfra_api_key: str | None = None
     # The models tasks may use; empty means only the default model, at OpenAI.
     models: dict[str, CatalogModel] = field(default_factory=dict)
-    auth: str = "dev"  # "dev" or "oidc"
+    auth: str = "dev"  # "dev" or "oidc"; the API needs WITX_AUTH to say which
     dev_tokens: dict[str, str] = field(default_factory=dict)  # bearer token -> subject
     oidc_issuer: str | None = None
     oidc_audience: str | None = None  # of access tokens sent as Bearer (non-browser clients)
@@ -108,7 +108,7 @@ class Settings:
     # Where users reach the Web app: OIDC redirects, Secure cookies, the allowed Origin.
     public_url: str = "http://127.0.0.1:5173"
     cors_origins: list[str] = field(default_factory=list)
-    # Retention : screenshots of finished tasks, and what a deleted task leaves.
+    # Retention: screenshots of finished tasks, and what a deleted task leaves.
     screenshot_retention: timedelta = timedelta(days=30)
     audit_retention: timedelta = timedelta(days=90)
     metrics_token: str | None = None  # /metrics is off without it
@@ -136,7 +136,7 @@ class Settings:
             openai_base_url=env.get("WITX_OPENAI_BASE_URL", "https://api.openai.com/v1"),
             deepinfra_api_key=env.get("DEEPINFRA_API_KEY") or None,
             models=parse_models(env.get("WITX_MODELS", "")),
-            auth=env.get("WITX_AUTH", "dev"),
+            auth=env.get("WITX_AUTH", ""),
             dev_tokens=dev_tokens,
             oidc_issuer=env.get("WITX_OIDC_ISSUER"),
             oidc_audience=env.get("WITX_OIDC_AUDIENCE"),

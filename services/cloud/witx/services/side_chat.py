@@ -215,6 +215,16 @@ async def _answer_all(db: Database, model: ModelClient, objects: ObjectStore) ->
             async with db.tenant(tenant_id) as conn:
                 todo = await side_chats.open_questions(conn)
             for question in todo:
-                await _answer(db, model, objects, tenant_id, question)
+                try:
+                    await _answer(db, model, objects, tenant_id, question)
+                except Exception:
+                    # Counted as a try, as a model error is: otherwise the question stays
+                    # first in line and holds up every one after it.
+                    log.exception("side chat answer failed")
+                    async with db.tenant(tenant_id) as conn:
+                        last = question.tries + 1 >= TRIES
+                        await side_chats.set_failed(
+                            conn, question.id, "internal_error" if last else None, None
+                        )
                 tried += 1
     return tried

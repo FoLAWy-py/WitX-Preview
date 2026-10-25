@@ -163,9 +163,9 @@ class AppiumDevice:
         capabilities: dict[str, Any],
         keep_warm: bool,
     ) -> None:
-        """Applies the device's settings from the Gateway's configuration while it runs:
-        what the next report says and the next session is opened with. A session
-        that is open stays as it is, so a device in the middle of a task is not touched."""
+        """Applies the device's settings from the Gateway's configuration while it runs
+        : what the next report says and the next session is opened with. A session
+                that is open stays as it is, so a device in the middle of a task is not touched."""
         self.name = name
         self.sensitive_apps = list(sensitive_apps)
         self._extra_capabilities = dict(capabilities)
@@ -536,10 +536,15 @@ class AppiumDevice:
         (x, y) down to its end, then up to its start, a little less than a screenful at a
         time, and taps the option when exactly one shows ``value``. Scrolling changes
         nothing but what is in view, so running out of time or list ends in "not_found"
-        without a tap."""
-        state = await self.state()
-        screen = (state.input_width, state.input_height)
+        without a tap. Up to the first swipe or tap it only reads: a screen that cannot be
+        read by then is a problem, not a failure, as nothing was touched."""
         deadline = time.monotonic() + SELECT_BUDGET
+        try:
+            state = await self.state()
+            options = await self._resting_options()
+        except DeviceError as error:
+            return Selection(problem=error.reason)
+        screen = (state.input_width, state.input_height)
         span = SWIPE_SPAN * screen[1]
         top = min(max(y - span / 2, 0.05 * screen[1]), 0.95 * screen[1] - span)
 
@@ -548,7 +553,7 @@ class AppiumDevice:
             verdict, found = find_option(options, value, screen)
             return verdict, found, options
 
-        verdict, found, options = await look()
+        verdict, found = find_option(options, value, screen)
         swipes = 0
         for forward in (True, False):  # down the list to its end, then back up to its start
             while verdict == "missing" and swipes < SELECT_SWIPES and time.monotonic() < deadline:

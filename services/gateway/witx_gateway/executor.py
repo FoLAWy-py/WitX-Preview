@@ -341,7 +341,15 @@ class Executor:
                     point = to_input(command.field_x, command.field_y, message.expected)
                 # Secrets, missing focus and the wrong field stop here.
                 await device.check_text_target(point)
+            opened: dict[str, Any] = {}  # by query: what matched, the opened one first
             if isinstance(command, LaunchApp):
+                if command.query is not None:  # the best match, as find_app ranks them
+                    matches = apps.match(command.query, await device.list_apps())
+                    if not matches:
+                        raise Rejected("app_not_found")
+                    opened["apps"] = [wire.FoundApp(app_id=a, name=n) for a, n in matches]
+                    command = LaunchApp(app_id=matches[0][0])
+                assert command.app_id is not None
                 await device.check_app(command.app_id)  # a wrong guess stops here
             state = await device.state()
             expected = message.expected
@@ -383,7 +391,8 @@ class Executor:
             async with asyncio.timeout(timeout):
                 done = await run()
         except (DeviceError, TimeoutError) as error:
-            # The input may have reached the device. Report it as such; never retry.
+            # The input may have reached the device. Report it as such; never retry. (An
+            # adapter that fails before it sends anything returns why instead of raising.)
             reason = error.reason if isinstance(error, DeviceError) else "timeout"
             return "unknown", reason[:64], {}
         except Exception:
@@ -393,9 +402,11 @@ class Executor:
             if done.selected is None:
                 return "returned", done.problem, {}
             return "returned", None, {"field_text": done.selected[: wire.FIELD_TEXT_MAX]}
+        # An input that stopped short says why: typing, or a picker. So does one that
+        # failed while the adapter only read, before it sent anything: returned, not unknown.
+        problem = done[:64] if isinstance(done, str) else None
         if device is not None and isinstance(command, TypeText):
-            # Typing that stopped short says why; what the field holds is read either way.
-            problem = done if isinstance(done, str) else None
+            # What the field holds is read either way.
             read = await self._read_back(device, command.text)
             if read is None:
                 return "returned", problem, {}
@@ -404,7 +415,7 @@ class Executor:
                 problem,
                 {"field_text": read.text} | self._field_report(read, message.expected),
             )
-        return "returned", None, {}
+        return "returned", problem, opened
 
     @staticmethod
     def _field_report(read: TextField, screen: wire.ScreenState) -> dict[str, Any]:
@@ -458,7 +469,7 @@ class Executor:
 
     @staticmethod
     def _prepare(
-        device: Device, command: object, screen: wire.ScreenState
+        device: Device, command: object, screen: wire.ScreenState, *, person: bool = False
     ) -> Callable[[], Awaitable[Any]]:
         if isinstance(command, Tap):
             x, y = to_input(command.x, command.y, screen)
@@ -489,7 +500,7 @@ class Executor:
             return lambda: device.pinch(middle, y, start, end)
         if isinstance(command, TypeText):
             return lambda: device.type_text(
-                command.text, replace=command.replace, method=command.method
+                command.text, replace=command.replace, method=command.method, person=person
             )
         if isinstance(command, SetPicker):
             x, y = to_input(command.x, command.y, screen)
@@ -508,7 +519,9 @@ class Executor:
         if isinstance(command, Lock):
             return device.lock
         if isinstance(command, LaunchApp):
-            return lambda: device.launch_app(command.app_id)
+            app_id = command.app_id
+            assert app_id is not None  # a query is resolved before
+            return lambda: device.launch_app(app_id)
         raise Rejected("unsupported_input")
 
     # ------------------------------------------------------------ takeover
@@ -699,12 +712,12 @@ class Executor:
             # person is moving between apps.
             if not same_geometry(await device.state(), message.screen):
                 raise Rejected("screen_changed")
-            run = self._prepare(device, command, message.screen)
+            run = self._prepare(device, command, message.screen, person=True)
         except (Rejected, DeviceError) as error:  # nothing touched the device yet
             return "rejected", error.reason[:64]
         try:
             async with asyncio.timeout(INPUT_TIMEOUT):
-                await run()
+                done = await run()
         except (DeviceError, TimeoutError) as error:
             return "unknown", (error.reason if isinstance(error, DeviceError) else "timeout")[:64]
         except Exception:
@@ -715,7 +728,9 @@ class Executor:
             # phone locked, and the takeover ends (``device_locked``).
             self._woken_at[message.device_id] = asyncio.get_running_loop().time()
             self._states.pop(message.device_id, None)
-        return "returned", None
+        # Typing that stopped short, or failed before it sent anything, says why, as for
+        # the agent.
+        return "returned", done[:64] if isinstance(done, str) else None
 
     def barrier(self, message: wire.Stop) -> None:
         """Puts the stop barrier on disk. Called as soon as the message arrives, so no

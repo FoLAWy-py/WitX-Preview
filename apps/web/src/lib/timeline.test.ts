@@ -6,6 +6,7 @@ import {
   latestScreens,
   openQuestions,
   screenshotAfter,
+  stopReason,
   type TimelineItem,
   inPart,
 } from "./timeline";
@@ -261,6 +262,25 @@ describe("timeline", () => {
       ],
       ["timeline.sys.model", { name: "luna" }],
     ]);
+  });
+
+  it("says a step that kept not finishing stopped, not that the model failed", () => {
+    const at = "2026-10-10T10:00:03Z";
+    const stopped = (code: string) =>
+      buildTimeline(task, [
+        {
+          seq: 3,
+          type: "run.model_error",
+          data: { run_id: "r1", code, retrying: false },
+          created_at: at,
+        },
+      ]).flatMap((i) => (i.kind === "status" ? [i.message] : []));
+    expect(stopped("step_failed")).toEqual(["timeline.sys.stepFailed"]);
+    expect(stopped("http_500")).toEqual(["timeline.sys.modelError"]);
+    expect(
+      stopReason("model error: the step did not finish 3 times in a row"),
+    ).toBe("stepFailed");
+    expect(stopReason("model error: http_500")).toBe("modelError");
   });
 
   it("orders inputs and agent messages by time", () => {

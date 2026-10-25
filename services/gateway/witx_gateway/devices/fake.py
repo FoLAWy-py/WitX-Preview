@@ -139,8 +139,10 @@ class FakeDevice:
             raise WrongField(TextField("", self.field_name, self.field_box))
 
     async def type_text(
-        self, text: str, *, replace: bool = False, method: TypeMethod = "set"
+        self, text: str, *, replace: bool = False, method: TypeMethod = "set", person: bool = False
     ) -> str | None:
+        if self.secure_field and not person:  # as the adapters, typing for the agent
+            return "secure_field"
         await self._input("type_text", text)
         self.typed_with.append(method)
         if self.typing_stops is not None:

@@ -29,10 +29,10 @@ CREATE DATABASE witx OWNER witx_owner;
 
 Python 测试使用假模型和假设备，不调用付费模型、不操作真机。数据库测试逐个创建隔离的临时库。设置 `WITX_TEST_DATABASE_URL`，或把 `initdb` / `pg_ctl` 加入 PATH，由非 root 测试进程启动临时集群；两者都没有时数据库测试会跳过，不能把跳过当作验证通过。
 
-Web 单元测试用 Vitest，浏览器测试用 Playwright 的合成 API 数据。先安装 Chromium：
+Web 单元测试用 Vitest，浏览器测试用 Playwright 的合成 API 数据。每个浏览器流程都会在 Chromium 和 WebKit 上验证。先安装两者：
 
 ```sh
-pnpm --filter @witx/web exec playwright install chromium
+pnpm --filter @witx/web exec playwright install chromium webkit
 make check
 ```
 
@@ -42,7 +42,7 @@ make check
 
 ## 配置与真实设备
 
-配置字段见 [.env.example](../.env.example)；Gateway 见 [gateway.example.toml](../services/gateway/gateway.example.toml)。开发服务监听 loopback。Appium 也应只监听本机，并以 `--log-level warn` 运行，避免日志记录人工接管输入。
+配置字段见 [.env.example](../.env.example)；Gateway 见 [gateway.example.toml](../services/gateway/gateway.example.toml)。API 启动前必须显式设置 `WITX_AUTH=dev`（仅本机开发）或 `WITX_AUTH=oidc`（正式部署）；未设置时拒绝启动。开发服务监听 loopback。Appium 也应只监听本机，并以 `--log-level warn` 运行，避免日志记录人工接管输入。
 
 Android 安装 ADB、Appium 和 UiAutomator2 driver；iOS 在 macOS 安装 Xcode 与 XCUITest driver，真机还需要开发者模式、信任和 WebDriverAgent 签名。在 Gateway 所在电脑运行：
 
@@ -51,7 +51,9 @@ witx-gateway --config gateway.toml doctor
 witx-gateway --config gateway.toml setup
 ```
 
-`doctor` 只检查；`setup` 先列出可修复步骤，经本机用户确认后执行。Gateway 自己管理会话和各设备端口。journal 放本地磁盘，凭据保存在系统密钥存储或权限为 0600 的凭据文件中。
+`doctor` 只检查；`setup` 先列出可修复步骤，经本机用户确认后执行。Gateway 自己管理会话和各设备端口。相对 `journal` 路径以 `gateway.toml` 所在目录为基准，journal 放本地磁盘，凭据保存在系统密钥存储或权限为 0600 的凭据文件中。
+
+已有 Gateway 升级前，先把 `journal` 设为原有文件的绝对路径，以保持 journal 和凭据使用相同位置。systemd 服务示例要求它位于可写的 `/var/lib/witx/`，不要放在只读的 `/etc/witx/`。
 
 ## 部署
 
@@ -63,7 +65,7 @@ docker compose -f deploy/compose.yaml run --rm api admin add-user --tenant demo 
 docker compose -f deploy/compose.yaml run --rm api admin add-gateway --tenant demo --name gateway-host
 ```
 
-Compose 提供 PostgreSQL、迁移、API / Hub、Worker 和 Nginx。Web 镜像在构建时预压缩文本静态文件，Nginx 发送对应的 gzip 文件并压缩 API JSON；SSE 事件和截图不走这项压缩。按 `deploy/nginx.conf` 的示例配置 TLS、证书挂载及 443 端口，设置正确的 `WITX_PUBLIC_URL`。请勿把开发令牌认证暴露到公网。Gateway 在手机旁的宿主机运行，不在云端容器里；Linux / macOS 服务模板位于 `deploy/gateway`。
+Compose 提供 PostgreSQL、迁移、API / Hub、Worker 和 Nginx。Web 镜像在构建时预压缩文本静态文件，Nginx 发送对应的 gzip 文件并压缩 API JSON；SSE 事件和截图不走这项压缩。按 `deploy/nginx.conf` 的示例配置 TLS、证书挂载及 443 端口，设置正确的 `WITX_PUBLIC_URL`。Nginx 模板为 Web 配置 CSP；启用 HTTPS 示例后，HSTS 适用于各类响应。请勿把开发令牌认证暴露到公网。Gateway 在手机旁的宿主机运行，不在云端容器里；Linux / macOS 服务模板位于 `deploy/gateway`。
 
 截图和 Plugin 默认在私有卷；可配置 S3 兼容对象存储。API 的 `/health/ready` 检查数据库和对象存储，`witx check` 额外检查模型目录可用性；模型列表可用不保证每次推理成功。日志默认结构化并脱敏，`/metrics` 需要配置 token。扩展 API 实例时，人工接管和 MCP 会话需要粘性路由。
 

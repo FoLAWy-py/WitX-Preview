@@ -14,8 +14,9 @@
 # finds adb, and keep Appium on this computer.
 
 cloud_url = "http://127.0.0.1:8000"
-journal = "witx-gateway.sqlite3"   # keep it on a local disk; the credential is stored
-                                   # under this path (moving it means enrolling again)
+journal = "witx-gateway.sqlite3"   # beside this file unless absolute; keep it on a local
+                                   # disk; the credential is stored under this path
+                                   # (moving it means enrolling again)
 appium_url = "http://127.0.0.1:4723"
 
 # A phone dedicated to this pool (kept unlocked, not carried around) can be kept ready: with

@@ -84,7 +84,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [devices]);
 
   // What changed is pushed: each burst of notices loads again the kinds it
-  // names, and connecting (again) loads everything, since notices are not kept.
+  // names, and connecting loads everything, since notices are not kept. The first
+  // connection too: the first loads went out before it listened, and a change made
+  // in between would wait for the fallback.
   const latest = useRef({ refresh, reloadDevices, schedules });
   latest.current = { refresh, reloadDevices, schedules };
   useEffect(() => {
@@ -109,8 +111,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             load(kinds);
           }, NOTICE_BURST_MS);
         },
-        onConnection: (up, reconnected) => {
-          if (up && reconnected) load(new Set(["all"]));
+        onConnection: (up) => {
+          if (up) load(new Set(["all"]));
         },
       },
     );

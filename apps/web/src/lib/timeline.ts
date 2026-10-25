@@ -450,9 +450,12 @@ export function buildTimeline(
         at: event.created_at,
         key,
         // A step tried again by itself says so; one that stopped waits for the person.
+        // Steps that kept not finishing need not be the model's fault (a worker died).
         message: event.data.retrying
           ? "timeline.sys.modelRetry"
-          : "timeline.sys.modelError",
+          : event.data.code === "step_failed"
+            ? "timeline.sys.stepFailed"
+            : "timeline.sys.modelError",
         vars: { code: String(event.data.code) },
       });
     } else if (event.type === "run.unconfirmed") {
@@ -527,8 +530,10 @@ export function openQuestions(
 /** Why a run stopped for you when it did not ask (as the server writes it), else "". */
 export function stopReason(
   detail: string | null,
-): "" | "repeating" | "unconfirmed" | "modelError" {
+): "" | "repeating" | "unconfirmed" | "stepFailed" | "modelError" {
   if (detail === "repeating" || detail === "unconfirmed") return detail;
+  if (detail?.startsWith("model error: the step did not finish"))
+    return "stepFailed";
   return detail?.startsWith("model error:") ? "modelError" : "";
 }
 

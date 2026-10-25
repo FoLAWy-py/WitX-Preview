@@ -13,7 +13,7 @@ import { CircleHelp, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/format";
 import { useLayout } from "@/lib/prefs";
 import { Ico } from "./base";
-import { Sheet } from "./dialog";
+import { Sheet, useLayer } from "./dialog";
 
 export type Placement = "bottom-start" | "bottom-end" | "top-start" | "top-end";
 
@@ -40,7 +40,14 @@ export function Popover({
   children: ReactNode;
 }) {
   const { layout } = useLayout();
-  const panel = useRef<HTMLDivElement>(null);
+  const panel = useLayer(
+    open && layout !== "phone",
+    () => {
+      onClose();
+      anchor.current?.focus();
+    },
+    false,
+  );
   const [style, setStyle] = useState<React.CSSProperties>({
     visibility: "hidden",
   });
@@ -91,19 +98,8 @@ export function Popover({
         return;
       onClose();
     };
-    const key = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-        anchor.current?.focus();
-      }
-    };
     document.addEventListener("mousedown", down);
-    window.addEventListener("keydown", key, true);
-    return () => {
-      document.removeEventListener("mousedown", down);
-      window.removeEventListener("keydown", key, true);
-    };
+    return () => document.removeEventListener("mousedown", down);
   }, [open, layout, onClose, anchor]);
 
   if (layout === "phone") {

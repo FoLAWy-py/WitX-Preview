@@ -44,12 +44,12 @@ export function QuestionAnswer({
     setBusy(true);
     setError(undefined);
     try {
+      // Like a message to a paused task: it carries on.
       await api.addInput(task.id, {
         text: reply.trim(),
+        resume: true,
         ...(runId && { run_id: runId }),
       });
-      // Like a message to a paused task: it carries on.
-      if (task.status === "paused") await api.resume(task.id);
       setText("");
       await onChange();
     } catch (err) {

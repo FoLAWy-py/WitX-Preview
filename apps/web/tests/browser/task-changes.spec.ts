@@ -39,19 +39,21 @@ test("after a burst of events the page asks only for what changed since its last
   });
   const streams: string[] = [];
   await page.route("**/api/v1/tasks/t1/events*", (route) => {
-    const url = new URL(route.request().url());
-    streams.push(url.searchParams.get("after") ?? "");
+    const after = new URL(route.request().url()).searchParams.get("after");
+    streams.push(after ?? "");
+    // The stream brings the event and ends, as a served one does; the page's next
+    // connection is left waiting, as a stream still open with nothing more to say.
+    // Answered, it would be a reconnect, after which the page fetches the whole task
+    // (here as it was before the event).
+    if (after !== "5") return;
     return route.fulfill({
       contentType: "text/event-stream",
-      body:
-        url.searchParams.get("after") === "5"
-          ? `id: 6\nevent: run.status\ndata: ${JSON.stringify({
-              seq: 6,
-              type: "run.status",
-              data: { run_id: "r1", status: "completed" },
-              created_at: "2026-10-10T10:05:00Z",
-            })}\n\n`
-          : "",
+      body: `id: 6\nevent: run.status\ndata: ${JSON.stringify({
+        seq: 6,
+        type: "run.status",
+        data: { run_id: "r1", status: "completed" },
+        created_at: "2026-10-10T10:05:00Z",
+      })}\n\n`,
     });
   });
   await signIn(page);

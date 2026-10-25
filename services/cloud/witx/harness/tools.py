@@ -40,38 +40,20 @@ def _number(description: str) -> dict[str, Any]:
 
 
 _DEVICE = _string("ID of the device.")
-_OBSERVATION = _string("ID of the newest screenshot of this device; coordinates refer to it.")
-_NOTES = {
-    "type": ["string", "null"],
-    "description": "What the current screenshot shows that you will need later (a value "
-    "to report, a price to compare), written down before you leave it: older screenshots "
-    "are not attached. Only what is new on this screen: what you wrote down before stays "
-    "in your context, so never repeat it. null if nothing new.",
-}
-_TARGET = _string("The visible element you are acting on, as it appears on screen.")
-_EXPECTED = _string("What you expect to happen on screen after this input.")
-_EFFECTS = {
-    "type": "array",
-    "items": {"type": "string", "enum": sorted(EFFECT_DEFINITIONS)},
-    "description": "Every effect this input may cause, as defined in the instructions "
-    "(change_data for an input that changes something). Empty if it only looks around. "
-    "Depending on the user's settings, inputs with effects wait for approval.",
-}
-_CHANGES = {
-    "type": ["string", "null"],
-    "description": f"With effects: what this input changes, in at most {CHANGES_MAX} "
-    "characters, in the user's language, naming the thing, e.g. 'plant cherries', "
-    "'reminder: Mon 9 am', 'notification settings'. Shown on the step. null if no effects.",
-}
+_APP_QUERY = _string(
+    "Every name the app goes by, and words likely in its ID: its name in the user's "
+    "words, in Chinese and in English, its international brand, its company, e.g. "
+    "'小红书 xiaohongshu rednote xingin' or '计算器 calculator'. Android lists only "
+    "IDs, and a phone shows names in its own language."
+)
+# The fields every input takes. What each means is in the instructions, once: repeated
+# in each input tool's schema, they made half of all the tools' tokens.
+_TEXT = {"type": "string"}
+_TEXT_OR_NULL = {"type": ["string", "null"]}
+_EFFECTS = {"type": "array", "items": {"type": "string", "enum": sorted(EFFECT_DEFINITIONS)}}
 _INTENT = {
     "type": ["object", "null"],
-    "description": "For an input that sends a message (send_message): recipient and the "
-    "full message text, plus sender (the account it is sent from) whenever the screen "
-    "shows it. For one that pays or buys (payment, purchase): payee, amount and "
-    "currency, plus address (delivery) and payment_method whenever the screen shows "
-    "them. Exactly as the screen shows them; the approval is bound to them. null for "
-    "anything not shown or not applicable.",
-    "properties": {f: {"type": ["string", "null"]} for f in ALL_INTENT_FIELDS},
+    "properties": {f: _TEXT_OR_NULL for f in ALL_INTENT_FIELDS},
     "required": list(ALL_INTENT_FIELDS),
     "additionalProperties": False,
 }
@@ -97,14 +79,14 @@ def _input_tool(name: str, description: str, extra: dict[str, Any]) -> dict[str,
         name,
         description,
         {
-            "device_id": _DEVICE,
-            "observation_id": _OBSERVATION,
-            "notes": _NOTES,
+            "device_id": _TEXT,
+            "observation_id": _TEXT,
+            "notes": _TEXT_OR_NULL,
             **extra,
-            "target": _TARGET,
-            "expected_effect": _EXPECTED,
+            "target": _TEXT,
+            "expected_effect": _TEXT,
             "effects": _EFFECTS,
-            "changes": _CHANGES,
+            "changes": _TEXT_OR_NULL,
             "intent": _INTENT,
         },
     )
@@ -235,24 +217,24 @@ TOOLS: list[dict[str, Any]] = [
     _input_tool("press_home", "Go to the home screen.", {}),
     _input_tool(
         "launch_app",
-        "Open an app installed on the device, by the ID find_app returned for it (or one "
-        "this task already opened on this phone). Do not guess an ID.",
-        {"app_id": _string("Android package or iOS bundle ID, e.g. com.android.settings.")},
+        "Open an app installed on the device. By query: the best match among the installed "
+        "apps opens, and the result lists the other matches. By app_id: one a search "
+        "returned, or that this task already opened on this phone; never a guessed ID. "
+        "Give one of the two, the other null. If nothing matches, look with the phone's "
+        "own search next (the result says how); never install an app.",
+        {
+            "query": {**_APP_QUERY, "type": ["string", "null"]},
+            "app_id": {
+                "type": ["string", "null"],
+                "description": "Android package or iOS bundle ID, e.g. com.android.settings.",
+            },
+        },
     ),
     _input_tool(
         "find_app",
-        "Search the apps installed on a device: the first step to open an app. Returns "
-        "the best matches; open the one the user meant with launch_app (in ask mode the "
-        "user confirms one below the best). If nothing matches, look with the phone's own "
-        "search next (the result says how); never install an app.",
-        {
-            "query": _string(
-                "Every name the app goes by, and words likely in its ID: its name in the "
-                "user's words, in Chinese and in English, its international brand, its "
-                "company, e.g. '小红书 xiaohongshu rednote xingin' or '计算器 calculator'. "
-                "Android lists only IDs, and a phone shows names in its own language."
-            )
-        },
+        "Search the apps installed on a device without opening one: the best matches, "
+        "best first. To open an app, use launch_app with the same query instead.",
+        {"query": _APP_QUERY},
     ),
     _tool(
         "delegate",
@@ -479,7 +461,9 @@ TOOLS: list[dict[str, Any]] = [
         "the goal cannot be achieved. When the answer is a choice, give the options and "
         "recommend one: the user answers with one tap.",
         {
-            "question": _string("One clear question."),
+            "question": _string(
+                "One clear question, in the language of the user's newest message."
+            ),
             "options": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -532,7 +516,10 @@ TOOLS: list[dict[str, Any]] = [
         "the screenshot where you saw it take effect. Set offer_skill when the task took "
         "about ten inputs or more, with wrong turns, and no skill covered it.",
         {
-            "summary": _string("What was achieved, and anything left undone."),
+            "summary": _string(
+                "What was achieved, and anything left undone, in the language of the "
+                "user's newest message."
+            ),
             "offer_skill": {
                 "type": "boolean",
                 "description": "Offer to keep how this task was done as a skill: the user "

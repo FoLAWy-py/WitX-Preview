@@ -112,6 +112,28 @@ async def test_a_question_that_keeps_failing_gets_an_error_not_endless_tries(
     assert message.tries == side_chat.TRIES
 
 
+async def test_a_question_that_fails_unexpectedly_does_not_hold_up_the_ones_after_it(
+    rig: Rig,
+) -> None:
+    task = await looked_and_said(rig)
+    broken = await ask(rig, task.id, uuid4(), "What broke?")
+    later = await ask(rig, task.id, uuid4(), "What did it find?")
+
+    class Flaky:
+        async def respond(self, request: ModelRequest) -> ModelResponse:
+            if "What broke?" in str(request.input):
+                raise RuntimeError("not a model error")
+            return ModelResponse(id="r", output=[say("80%.")], usage=None, raw={})
+
+    for _ in range(side_chat.TRIES):
+        await side_chat.answer_open(rig.db, Flaky(), rig.objects)  # type: ignore[arg-type]
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        answers = {m.id: m for m in await side_chats.for_task(conn, task.id)}
+    assert answers[later.id].answer == "80%."
+    assert answers[broken.id].error == "internal_error"
+    assert answers[broken.id].tries == side_chat.TRIES
+
+
 async def test_closing_a_side_chat_forgets_it(rig: Rig) -> None:
     task = await looked_and_said(rig)
     thread = uuid4()

@@ -6,6 +6,10 @@ so it is reported as ``unknown`` and never executed again. Results wait in the
 outbox until the cloud acknowledges them, so nothing is lost across reconnects.
 
 Keep the journal on a local disk (SQLite WAL does not work on network filesystems).
+
+``actions`` and ``seen`` are never pruned: a row there is what makes a resent ID a repeat,
+and without it only the action's deadline, read on this machine's clock, would stand
+between a resend and a second input. One person's phones add a few hundred rows a day.
 """
 
 import sqlite3

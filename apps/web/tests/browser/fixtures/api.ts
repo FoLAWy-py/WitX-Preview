@@ -12,6 +12,9 @@ export async function mockApi(
   modes: unknown[] = [],
   allowFull = false,
 ) {
+  // Signed in once the dev login below has set the session cookie. WebKit leaves the
+  // Cookie header out of intercepted requests, so the header cannot be read in both.
+  let signedIn = false;
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -27,11 +30,11 @@ export async function mockApi(
         { name: "witx_session", value: "s1", url: url.origin, httpOnly: true },
         { name: "witx_csrf", value: "c1", url: url.origin },
       ]);
+      signedIn = true;
       return route.fulfill({ status: 204 });
     }
+    if (!signedIn) return route.fulfill({ status: 401, json: {} });
     const headers = await request.allHeaders();
-    if (!(headers.cookie ?? "").includes("witx_session=s1"))
-      return route.fulfill({ status: 401, json: {} });
     if (request.method() !== "GET" && headers["x-csrf-token"] !== "c1")
       return route.fulfill({ status: 403, json: { detail: "csrf" } });
     if (path === "/api/v1/me")

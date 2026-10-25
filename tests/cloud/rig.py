@@ -48,7 +48,8 @@ class SimulatedGateway:
     stops: list[wire.Stop] = field(default_factory=list)
     held: list[wire.Action] = field(default_factory=list)
     manual: list[wire.ManualInput] = field(default_factory=list)  # a person's input
-    found_apps: list[dict[str, Any]] = field(default_factory=list)  # what find_app finds
+    # What find_app, or launch_app by query, finds; the latter opens the first.
+    found_apps: list[dict[str, Any]] = field(default_factory=list)
     field_text: str | None = None  # what the field holds after type_text (None: unread)
     field_name: str | None = None  # ... and what the app calls it
     wrong_field: bool = False  # the focused field is not where the agent pointed
@@ -203,8 +204,13 @@ class Rig:
     async def finish_action(self, action: wire.Action, outcome: str) -> None:
         if action.epoch != self.gateway.epochs.get(action.device_id):
             outcome = "rejected"
-        search = action.input.kind == "find_app" and outcome == "returned"
+        by_query = action.input.kind == "launch_app" and action.input.query is not None
+        if by_query and outcome == "returned" and not self.gateway.found_apps:
+            outcome = "app_not_found"  # nothing to open: rejected below, with this reason
+        search = (action.input.kind == "find_app" or by_query) and outcome == "returned"
         reason = "epoch" if outcome == "rejected" else None
+        if outcome == "app_not_found":
+            outcome, reason = "rejected", "app_not_found"
         if action.input.kind == "select_option" and outcome == "returned":
             reason = self.gateway.select_problem
         if action.input.kind == "type_text" and outcome == "returned":

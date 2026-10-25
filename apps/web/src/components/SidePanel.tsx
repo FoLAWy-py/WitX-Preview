@@ -135,6 +135,7 @@ function TabButton({
         aria-selected={selected}
         tabIndex={selected ? 0 : -1}
         title={label}
+        aria-keyshortcuts="Delete"
         onClick={onSelect}
         onAuxClick={(e) => e.button === 1 && onClose()}
         className="flex h-full min-w-0 items-center gap-1.5 pr-0.5 pl-2"
@@ -142,16 +143,19 @@ function TabButton({
         <Ico icon={icon} size={14} className="shrink-0" />
         <span className="truncate">{label}</span>
       </button>
+      {/* For the pointer; from the keyboard, Delete on the tab closes it. A tab list
+          holds only tabs, so this is hidden from assistive technology. */}
       <button
         type="button"
-        aria-label={closeLabel}
+        tabIndex={-1}
+        aria-hidden
         title={closeLabel}
         onClick={onClose}
         className={cn(
           "mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-faint hover:bg-line hover:text-fg pointer-coarse:h-7 pointer-coarse:w-7",
           // Out of the way until wanted, except on touch where there is no hover.
           !selected &&
-            "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100",
+            "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100",
         )}
       >
         <X size={12} aria-hidden />
@@ -160,14 +164,25 @@ function TabButton({
   );
 }
 
-/** Arrow keys move along the tabs, Home and End to either end (WAI-ARIA tabs). */
+/** Arrow keys move along the tabs, Home and End to either end (WAI-ARIA tabs);
+ * Delete closes the tab and focus moves to the one shown next. */
 function moveAlongTabs(
   e: KeyboardEvent<HTMLDivElement>,
   pick: (tab: PanelTab) => void,
+  close: (tab: PanelTab) => void,
 ) {
-  const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-tab]")];
+  const strip = e.currentTarget;
+  const tabs = [...strip.querySelectorAll<HTMLElement>("[data-tab]")];
   const at = tabs.indexOf(document.activeElement as HTMLElement);
   if (at < 0) return;
+  if (e.key === "Delete" || e.key === "Backspace") {
+    e.preventDefault();
+    close(tabs[at].dataset.tab as PanelTab);
+    requestAnimationFrame(() =>
+      strip.querySelector<HTMLElement>("[aria-selected=true]")?.focus(),
+    );
+    return;
+  }
   const next =
     e.key === "ArrowRight"
       ? (at + 1) % tabs.length
@@ -457,7 +472,7 @@ export function SidePanel({
           ref={strip}
           role="tablist"
           aria-label={t("panel.title")}
-          onKeyDown={(e) => moveAlongTabs(e, tabs.select)}
+          onKeyDown={(e) => moveAlongTabs(e, tabs.select, tabs.close)}
           className={cn(
             "tab-strip flex min-w-0 flex-1 items-center gap-1",
             crowded && "tab-strip-crowded",

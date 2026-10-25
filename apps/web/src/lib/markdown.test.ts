@@ -11,4 +11,19 @@ describe("agent text", () => {
     expect(html).toContain("<strong>烟霾仍是焦点：</strong>新加坡");
     expect(html).not.toContain("**");
   });
+
+  it("does not turn a javascript: link, image or autolink into something to open", () => {
+    const html = renderToStaticMarkup(
+      createElement(Markdown, {
+        text: [
+          "[x](javascript:alert(1))",
+          "![y](javascript:alert(2))",
+          "<javascript:alert(3)>",
+          "[z](JaVaScRiPt:alert(4))",
+        ].join("\n\n"),
+      }),
+    );
+    expect(html).toContain(">x<");
+    expect(html.toLowerCase()).not.toMatch(/(href|src)="\s*javascript:/);
+  });
 });

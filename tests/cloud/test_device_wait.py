@@ -1,13 +1,14 @@
 """A run whose phones cannot be used (offline, or connected but not responding) waits for
 one to come back without calling the model, and gives up after a while."""
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
 import pytest
 from witx.domain.model import RunStatus, TaskStatus, WaitReason
 from witx.services import lifecycle
-from witx.store import runs
+from witx.store import runs, tasks
 from witx.store.db import Database, execute
 from witx_contracts import gateway as wire
 
@@ -144,3 +145,17 @@ async def test_a_sub_agent_whose_phone_is_away_waits_for_it_and_the_main_agent_w
     assert child.wait_reason == WaitReason.DEVICE
     assert child.wait_detail == "waiting for Pixel 1 to reconnect"
     assert len(rig.model.requests) == 1  # the sub-agent has not called the model
+
+
+async def test_a_phone_reported_back_while_its_task_stops_wakes_the_run_without_a_deadlock(
+    rig: Rig,
+) -> None:
+    task = await waiting_for_the_phone(rig)
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        await tasks.get(conn, task.id, lock=True)  # the stop has begun
+        reported = asyncio.create_task(report(rig, {}))
+        await asyncio.sleep(0.3)  # the report wakes the run meanwhile, as far as it can go
+        await lifecycle.stop(conn, task.id)
+    await reported
+
+    assert (await rig.task(task.id)).status in (TaskStatus.STOPPING, TaskStatus.STOPPED)

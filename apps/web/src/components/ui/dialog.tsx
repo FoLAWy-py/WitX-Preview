@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type PointerEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -102,27 +104,90 @@ export function useDragToClose(
   return { handlers, style, reset };
 }
 
-function useEscape(on: boolean, fn?: () => void) {
-  useEffect(() => {
-    if (!on || !fn) return;
-    const h = (e: globalThis.KeyboardEvent) => e.key === "Escape" && fn();
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [on, fn]);
+/** An open dialog, sheet, drawer or popover; the last one opened is on top. */
+interface Layer {
+  panel: RefObject<HTMLElement | null>;
+  close: RefObject<(() => void) | undefined>;
+  /** Focus stays inside it while it is on top. */
+  modal: boolean;
 }
 
-function useFocusIn(on: boolean) {
-  const ref = useRef<HTMLDivElement>(null);
+const layers: Layer[] = [];
+
+const FOCUSABLE =
+  "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+function focusables(panel: HTMLElement) {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => el.getClientRects().length > 0,
+  );
+}
+
+/** Escape closes only the layer on top, and Tab goes round inside it if it is modal.
+ * A key something inside has already handled (`preventDefault`) is left alone. */
+function onLayerKey(e: globalThis.KeyboardEvent) {
+  const top = layers.at(-1);
+  if (!top || e.defaultPrevented) return;
+  if (e.key === "Escape") {
+    const close = top.close.current;
+    if (!close) return;
+    e.preventDefault();
+    close();
+    return;
+  }
+  const panel = top.panel.current;
+  if (e.key !== "Tab" || !top.modal || !panel) return;
+  const items = focusables(panel);
+  const at = document.activeElement;
+  const inside = panel.contains(at);
+  const edge = e.shiftKey ? items[0] : items.at(-1);
+  const wrap = () => (e.shiftKey ? items.at(-1) : items[0])?.focus();
+  if (inside && at !== edge && items.length) {
+    // Safari's Tab skips buttons and links, so the last field can be its last stop
+    // here and the next Tab leaves: then focus goes round as it would from the edge.
+    setTimeout(() => {
+      if (layers.at(-1) === top && !panel.contains(document.activeElement))
+        wrap();
+    });
+    return;
+  }
+  e.preventDefault();
+  wrap();
+}
+
+/**
+ * Puts a layer on the stack while `open`. A modal layer takes focus when it opens (an
+ * element marked `data-autofocus` first) and gives it back when it closes.
+ */
+export function useLayer<T extends HTMLElement = HTMLDivElement>(
+  open: boolean,
+  onClose: (() => void) | undefined,
+  modal = true,
+) {
+  const panel = useRef<T>(null);
+  const close = useRef(onClose);
+  useLayoutEffect(() => {
+    close.current = onClose;
+  });
   useEffect(() => {
-    if (!on) return;
-    const prev = document.activeElement as HTMLElement | null;
-    const el = ref.current?.querySelector<HTMLElement>(
-      "[data-autofocus], button, input, textarea",
-    );
-    el?.focus();
-    return () => prev?.focus?.();
-  }, [on]);
-  return ref;
+    if (!open) return;
+    const layer: Layer = { panel, close, modal };
+    layers.push(layer);
+    if (layers.length === 1) window.addEventListener("keydown", onLayerKey);
+    const prev = modal ? (document.activeElement as HTMLElement | null) : null;
+    if (modal && panel.current) {
+      const first =
+        panel.current.querySelector<HTMLElement>("[data-autofocus]") ??
+        focusables(panel.current)[0];
+      first?.focus();
+    }
+    return () => {
+      layers.splice(layers.indexOf(layer), 1);
+      if (!layers.length) window.removeEventListener("keydown", onLayerKey);
+      prev?.focus?.();
+    };
+  }, [open, modal]);
+  return panel;
 }
 
 /** Centered dialog. Without `onClose` it cannot be dismissed by backdrop or Escape. */
@@ -143,8 +208,7 @@ export function Dialog({
   tone?: "amber" | "red" | "violet";
   wide?: boolean;
 }) {
-  const ref = useFocusIn(open);
-  useEscape(open, onClose);
+  const ref = useLayer(open, onClose);
   const { t } = useI18n();
   const [id] = useState(() => `dialog-${Math.random().toString(36).slice(2)}`);
   const { shown, leaving } = usePresence(open, 150);
@@ -218,8 +282,7 @@ export function Sheet({
   full?: boolean;
   tone?: "amber";
 }) {
-  const ref = useFocusIn(open);
-  useEscape(open, onClose);
+  const ref = useLayer(open, onClose);
   const { t } = useI18n();
   const { shown, leaving } = usePresence(open, 240);
   const drag = useDragToClose("down", full ? undefined : onClose);

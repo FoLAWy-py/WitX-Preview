@@ -13,13 +13,13 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/format";
 import { useLayout } from "@/lib/prefs";
 import { Button } from "./ui/base";
-import { useDragToClose, usePresence } from "./ui/dialog";
+import { useDragToClose, useLayer, usePresence } from "./ui/dialog";
 import { Sidebar } from "./Sidebar";
 
 const ShellContext = createContext<{ openNav?: () => void }>({});
 
 /** The navigation on phones: slides in from the left; a tap outside, Escape or a swipe
- * to the left closes it. */
+ * to the left closes it, and focus stays in it while it is open. */
 function NavDrawer({
   open,
   onClose,
@@ -32,13 +32,10 @@ function NavDrawer({
   const { shown, leaving } = usePresence(open, 220);
   const drag = useDragToClose("left", onClose);
   const { reset } = drag;
+  const panel = useLayer<HTMLElement>(open, onClose);
   useEffect(() => {
-    if (!open) return;
-    reset();
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [open, onClose, reset]);
+    if (open) reset();
+  }, [open, reset]);
   if (!shown) return null;
   return (
     <div
@@ -49,6 +46,7 @@ function NavDrawer({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <aside
+        ref={panel}
         aria-label={label}
         data-drag-panel
         {...drag.handlers}

@@ -117,7 +117,7 @@ test("a question from the agent is answered in its card", async ({ page }) => {
   const answer = page.getByPlaceholder("Type your answer");
   await answer.fill("Large");
   await answer.press("Enter");
-  await expect.poll(() => sent).toEqual([{ text: "Large" }]);
+  await expect.poll(() => sent).toEqual([{ text: "Large", resume: true }]);
   // The message box below still takes an answer too.
   await expect(page.getByLabel("Message to the agent")).toHaveAttribute(
     "placeholder",
@@ -166,7 +166,9 @@ test("a question's options are one per line, the recommended one first, each ans
   await expect(buttons.first()).toContainText("Tokyo Disneyland");
   await expect(buttons.first()).toContainText("(recommended)");
   await buttons.first().click();
-  await expect.poll(() => sent).toEqual([{ text: "Tokyo Disneyland" }]);
+  await expect
+    .poll(() => sent)
+    .toEqual([{ text: "Tokyo Disneyland", resume: true }]);
   // Any other answer can be typed in the card.
   await expect(page.getByPlaceholder("Or type another answer")).toBeVisible();
 });
@@ -213,7 +215,9 @@ test("a plan the agent presents is approved with a button, or answered from the 
   await card.getByRole("button", { name: "Keep planning" }).click();
   await expect(page.locator("#note")).toBeFocused();
   await card.getByRole("button", { name: "Approve and run" }).click();
-  await expect.poll(() => sent).toEqual([{ text: "/plan approve" }]);
+  await expect
+    .poll(() => sent)
+    .toEqual([{ text: "/plan approve", resume: true }]);
 });
 
 const RICH = [

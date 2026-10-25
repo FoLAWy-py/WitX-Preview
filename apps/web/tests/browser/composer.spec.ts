@@ -123,17 +123,20 @@ test("one button sends a message, pauses a running task and resumes a paused one
   const box = page.getByLabel("Message to the agent");
   await box.fill("Use the blue one");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect.poll(() => calls).toEqual([{ text: "Use the blue one" }]);
+  await expect
+    .poll(() => calls)
+    .toEqual([{ text: "Use the blue one", resume: true }]);
 
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect.poll(() => calls.at(-1)).toBe("pause");
 
-  // Writing to a paused task carries on with it, as in a chat.
+  // Writing to a paused task carries on with it, as in a chat: in the same write, so a
+  // resume that fails leaves no message behind to send twice.
   await box.fill("Now the red one");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect
     .poll(() => calls.slice(-2))
-    .toEqual([{ text: "Now the red one" }, "resume"]);
+    .toEqual(["pause", { text: "Now the red one", resume: true }]);
 });
 
 test("the first message offers /plan, and a task is created with it", async ({
@@ -287,7 +290,9 @@ test("typing / offers /goal, and a /goal message is sent as it is", async ({
     page.getByText(/Sending makes this the task's goal/),
   ).toBeVisible();
   await box.press("Enter");
-  await expect.poll(() => sent).toEqual([{ text: "/goal Check the battery" }]);
+  await expect
+    .poll(() => sent)
+    .toEqual([{ text: "/goal Check the battery", resume: true }]);
 });
 
 test("the first message offers /goal, and a task is created with it", async ({
@@ -319,8 +324,11 @@ test("the first message offers /goal, and a task is created with it", async ({
 test("a message of the person's can be copied, edited into the message box, or sent again", async ({
   page,
   context,
+  browserName,
 }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // Chromium asks for these; WebKit has no such permissions and allows a click's copy.
+  if (browserName === "chromium")
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await mockApi(page, []);
   const sent: unknown[] = [];
   const running = {
@@ -338,16 +346,31 @@ test("a message of the person's can be copied, edited into the message box, or s
   await page.getByRole("button", { name: "Sign in with token" }).click();
   await openTask(page);
 
+  if (browserName === "chromium")
+    await page.evaluate(() => navigator.clipboard.writeText(""));
   await page.getByRole("button", { name: "Copy", exact: true }).click();
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe(task.inputs[0].text);
-  await page.getByRole("button", { name: "Edit and send again" }).click();
   const box = page.getByLabel("Message to the agent");
+  if (browserName === "chromium") {
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(task.inputs[0].text);
+  } else {
+    // WebKit permits reading the clipboard only through the person's paste.
+    await expect(
+      page.getByRole("button", { name: "Copied", exact: true }),
+    ).toBeVisible();
+    await box.focus();
+    await page.keyboard.press("ControlOrMeta+V");
+    await expect(box).toHaveValue(task.inputs[0].text);
+    await box.fill("");
+  }
+  await page.getByRole("button", { name: "Edit and send again" }).click();
   await expect(box).toHaveValue(task.inputs[0].text);
   await expect(box).toBeFocused();
   await page.getByRole("button", { name: "Send again", exact: true }).click();
-  await expect.poll(() => sent).toEqual([{ text: task.inputs[0].text }]);
+  await expect
+    .poll(() => sent)
+    .toEqual([{ text: task.inputs[0].text, resume: true }]);
 });
 
 test("a model whose provider the workspace does not allow cannot be chosen", async ({
@@ -454,7 +477,9 @@ test("what is written to a task stays after leaving the page and after a reload,
   await expect(box).toHaveValue("Half a thought");
 
   await box.press("Enter");
-  await expect.poll(() => sent).toEqual([{ text: "Half a thought" }]);
+  await expect
+    .poll(() => sent)
+    .toEqual([{ text: "Half a thought", resume: true }]);
   await expect(box).toHaveValue("");
   await page.reload();
   await expect(box).toHaveValue("");

@@ -23,6 +23,37 @@ const notice = (seq: number, kind: string) =>
     created_at: "2026-10-10T10:00:00Z",
   })}\n\n`;
 
+test("a change made before the workspace's stream listens shows once it does", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  let added = false;
+  await page.route("**/api/v1/devices", (route) =>
+    added ? route.fallback() : route.fulfill({ json: [] }),
+  );
+  // Streams opened before the test lets them listen do so then (the page may have
+  // opened one it closed again); later ones are left waiting, as a stream still open
+  // with nothing to say.
+  let listen = false;
+  await page.route("**/api/v1/workspace/events", async (route) => {
+    if (listen) return;
+    await expect.poll(() => listen, { timeout: 20_000 }).toBe(true);
+    await route
+      .fulfill({ contentType: "text/event-stream", body: ": listening\n\n" })
+      .catch(() => {}); // a stream the page already closed
+  });
+  await signIn(page);
+  await page.waitForURL("/");
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("link", { name: "Pixel 8" })).toHaveCount(0);
+
+  added = true; // after the page loaded its devices, before its stream listened
+  listen = true;
+
+  await expect(page.getByRole("link", { name: "Pixel 8" })).toBeVisible();
+});
+
 test("a notice that devices changed loads the devices again, and nothing else", async ({
   page,
 }) => {
@@ -50,9 +81,15 @@ test("a notice that devices changed loads the devices again, and nothing else", 
 
   send = true;
 
-  await expect.poll(() => asked.devices).toBe(1);
+  // Listening loads everything once (the task lists, each its own request); the notice
+  // then loads only the devices.
+  await expect.poll(() => asked.devices).toBe(2);
   await page.waitForTimeout(400);
-  expect(asked).toEqual({ tasks: 0, groups: 0, devices: 1, schedules: 0 });
+  expect({ ...asked, tasks: undefined }).toEqual({
+    groups: 1,
+    devices: 2,
+    schedules: 1,
+  });
 });
 
 test("with no notices the workspace does not poll every few seconds, only once a minute", async ({

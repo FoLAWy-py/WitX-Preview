@@ -920,11 +920,10 @@ export function TaskComposer({
   async function send() {
     const body = text.trim();
     if (!body || stopping) return;
-    const sent = await run(async () => {
-      await api.addInput(task.id, { text: body });
-      // Like a chat: writing to a paused task carries on with it.
-      if (task.status === "paused") await api.resume(task.id);
-    });
+    // Like a chat: writing to a paused task carries on with it.
+    const sent = await run(() =>
+      api.addInput(task.id, { text: body, resume: true }),
+    );
     if (sent) setText("");
   }
 

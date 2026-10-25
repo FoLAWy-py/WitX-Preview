@@ -493,8 +493,8 @@ def test_an_option_chosen_by_its_text_cannot_be_one_with_an_effect() -> None:
 def test_choosing_an_option_looks_like_a_tap_to_the_policy_and_the_loop_check() -> None:
     assert "select_option" in rules.ASSESSED_KINDS
     same = {"kind": "select_option", "x": 10, "y": 500, "value": "China +86"}
-    assert rules._same_input(same, same | {"x": 400})
-    assert not rules._same_input(same, same | {"value": "Japan +81"})
+    assert rules.same_input(same, same | {"x": 400})
+    assert not rules.same_input(same, same | {"value": "Japan +81"})
     assert rules.text_flags({"kind": "select_option", "x": 1, "y": 2, "value": "\u00a5 500"}) == [
         "money"
     ]
@@ -655,3 +655,49 @@ def test_a_run_stops_trying_once_its_steps_ended_unfinished_several_times_in_a_r
     assert not rules.steps_keep_failing(["sent"] + ["abandoned"] * (n - 2) + ["done"])
     # Resumed by its user: the abandoned steps alone do not stop it again.
     assert not rules.steps_keep_failing(["abandoned"] * n)
+
+
+def test_a_card_number_is_one_whose_check_digit_is_right_and_a_phone_number_is_not() -> None:
+    def flags(text: str) -> list[str]:
+        return rules.text_flags({"kind": "type_text", "text": text})
+
+    assert "card_number" in flags("4111 1111 1111 1111")
+    assert "card_number" in flags("4111-1111-1111-1111")
+    assert "card_number" not in flags("4111 1111 1111 1112")  # a wrong check digit
+    # A Chinese mobile number with its country code is 13 digits, like a short card's.
+    assert flags("+86 13911112959") == ["phone_number"]
+    assert flags("+8613911112959") == ["phone_number"]
+
+
+def test_opening_apps_by_different_names_is_not_the_same_input() -> None:
+    by_name = {"kind": "launch_app", "app_id": None, "query": "计算器 calculator"}
+    assert rules.same_input(by_name, dict(by_name))
+    assert not rules.same_input(by_name, by_name | {"query": "设置 settings"})
+
+
+def test_a_reply_in_chinese_to_an_english_request_is_in_another_language() -> None:
+    asked = "In Settings, under About, what is this phone's model name?"
+    assert rules.wrong_language(asked, "型号名称（Model Name）显示为：iPhone 18 Pro Max。")
+    # Few characters of its own, the rest the English the screen shows: still Chinese.
+    assert rules.wrong_language(
+        asked, "在 Settings > General > About 中，Model Name 显示为：iPhone。"
+    )
+    assert not rules.wrong_language(asked, "The model name is iPhone 18 Pro Max.")
+
+
+def test_an_english_reply_may_quote_chinese_from_the_screen() -> None:
+    asked = "What does the General page say about this phone?"
+    assert not rules.wrong_language(asked, "It shows “关于本机 软件更新 隔空投送” at the top.")
+
+
+def test_a_request_that_names_someone_in_chinese_is_still_english() -> None:
+    asked = "Text 张三 that I'm running late"
+    assert not rules.wrong_language(asked, "I sent 张三 the message that you're running late.")
+    assert rules.wrong_language(asked, "已给张三发送消息，告诉他你会晚到。")
+
+
+def test_a_reply_in_english_to_a_chinese_request_is_in_another_language() -> None:
+    asked = "这台手机的系统版本号是多少？"
+    assert rules.wrong_language(asked, "This phone is running iOS 27.0, per Settings.")
+    # Chinese naming the English the screen shows is in the request's language.
+    assert not rules.wrong_language(asked, "在 Settings > General > About 里显示 iOS 27.0。")

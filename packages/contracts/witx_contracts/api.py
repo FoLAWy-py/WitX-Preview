@@ -125,10 +125,12 @@ class TenantSettings(Wire):
 
 class TaskInputCreate(Wire):
     """A message from the user to the task's agent: the main agent, or with ``run_id``
-    the agent whose question it answers."""
+    the agent whose question it answers. ``resume``: a paused task carries on, as in
+    a chat; if it cannot (a takeover is on), the message is not added either."""
 
     text: str = Field(min_length=1, max_length=4000)
     run_id: UUID | None = None
+    resume: bool = False
 
 
 class ApprovalDecision(Wire):

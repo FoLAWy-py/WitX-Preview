@@ -301,9 +301,37 @@ async def test_android_pastes_unicode_at_the_cursor_and_leaves_nothing_on_the_cl
     assert not any(script == "mobile: type" for script, _ in sent)  # pasted whole, not key by key
     assert world["field_text"] == "买牛奶 WitX"
     assert world["clipboard"] == ""
-    world["no_focus"] = True
-    with pytest.raises(DeviceError, match="no_focused_field"):
-        await device.type_text("x")
+
+
+async def test_android_typing_into_a_field_gone_before_the_paste_says_so_and_sends_nothing() -> (
+    None
+):
+    requests: Requests = []
+    world: dict[str, Any] = {}
+    device = android(requests, world)
+    await device.check_text_target()
+    world["no_focus"] = True  # the field closed after the check
+    assert await device.type_text("Ann", replace=True) == "no_focused_field"
+    assert "clipboard" not in world
+    assert [s for s in scripts(requests) if s["script"] == "mobile: pressKey"] == []  # type: ignore[index]
+
+
+async def test_android_typing_that_fails_once_the_paste_began_still_raises() -> None:
+    base = appium([], {})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if b"pressKey" in request.content:  # the session is lost while pasting
+            return httpx.Response(404, json={"value": {"error": "invalid session id"}})
+        return base.handler(request)  # type: ignore[no-any-return]
+
+    device = AndroidDevice(
+        serial="emulator-5554",
+        name="Pixel",
+        appium_url="http://127.0.0.1:4723",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(DeviceError, match="session_lost"):
+        await device.type_text("Ann")
 
 
 async def test_android_types_into_a_field_that_refuses_paste_without_doubling_text() -> None:
@@ -383,6 +411,23 @@ async def test_ios_reads_back_the_focused_field_but_never_a_secure_text_field() 
 async def test_android_refuses_to_type_into_a_password_field() -> None:
     with pytest.raises(DeviceError, match="secure_field"):
         await android([], {"password": "true"}).check_text_target()
+
+
+async def test_android_does_not_type_into_a_password_field_the_focus_moved_to_after_the_check() -> (
+    None
+):
+    world: dict[str, Any] = {}
+    device = android([], world)
+    await device.check_text_target()
+    world["password"] = "true"  # the form moved on to its password field
+    assert await device.type_text("hunter2") == "secure_field"
+    assert "hunter2" not in (world.get("field_text", ""), world.get("clipboard", ""))
+
+
+async def test_a_person_taking_an_android_phone_over_types_into_a_password_field() -> None:
+    world: dict[str, Any] = {"password": "true"}
+    assert await android([], world).type_text("hunter2", person=True) is None
+    assert world["field_text"] == "hunter2"
 
 
 async def test_android_refuses_to_type_on_a_screen_hidden_from_screenshots() -> None:
@@ -684,6 +729,36 @@ async def test_ios_refuses_to_type_into_a_secure_text_field() -> None:
         await device.check_text_target()
 
 
+async def test_ios_does_not_set_text_into_a_secure_field_the_focus_moved_to_after_the_check() -> (
+    None
+):
+    requests: Requests = []
+    world: dict[str, Any] = {}
+    device = IOSDevice(
+        udid="UDID-1",
+        name="n",
+        appium_url="http://127.0.0.1:4723",
+        transport=appium(requests, world),
+    )
+    await device.check_text_target()
+    world["field_type"] = "XCUIElementTypeSecureTextField"  # the form moved on
+    assert await device.type_text("hunter2") == "secure_field"
+    assert "hunter2" not in str(requests)
+
+
+async def test_a_person_taking_an_iphone_over_types_into_a_secure_field() -> None:
+    requests: Requests = []
+    world: dict[str, Any] = {"field_type": "XCUIElementTypeSecureTextField"}
+    device = IOSDevice(
+        udid="UDID-1",
+        name="n",
+        appium_url="http://127.0.0.1:4723",
+        transport=appium(requests, world),
+    )
+    assert await device.type_text("hunter2", person=True) is None
+    assert "hunter2" in str(requests)
+
+
 async def test_ios_sets_the_picker_wheel_under_the_point() -> None:
     requests: Requests = []
     device = IOSDevice(
@@ -696,6 +771,25 @@ async def test_ios_sets_the_picker_wheel_under_the_point() -> None:
     assert requests[-1] == ("POST", "/session/S1/element/MINUTE/value", {"text": "30"})
     with pytest.raises(DeviceError, match="no_picker"):
         await device.check_picker_target(300, 420)
+
+
+async def test_ios_setting_text_into_a_field_gone_before_any_key_says_so_and_sends_nothing() -> (
+    None
+):
+    requests: Requests = []
+    world: dict[str, Any] = {}
+    device = ios_device("UDID-1", world, requests)
+    await device.check_text_target()
+    world["no_focus"] = True  # the field closed after the check
+    assert await device.type_text("Ann", replace=True) == "no_focused_field"
+    assert [p for method, p, _ in requests if method == "POST" and "/element/" in p] == []
+
+
+async def test_ios_picker_wheel_gone_before_it_is_turned_says_so_and_turns_nothing() -> None:
+    requests: Requests = []
+    device = ios_device("UDID-1", {}, requests)
+    assert await device.set_picker(300, 420, "30") == "no_picker"  # no wheel under the point
+    assert not [p for _, p, _ in requests if p.endswith("/value")]
 
 
 async def test_ios_sets_a_slider_again_until_it_reports_the_value() -> None:
@@ -786,8 +880,8 @@ async def test_ios_empties_the_field_before_typing_text_that_replaces_it() -> No
     device = ios_device(SIMULATOR, {"device_info": {"isSimulator": True}}, requests)
     await device.type_text("Ann", replace=True)
     await device.type_text("Lee")
-    sent = [(method, path.rsplit("/", 1)[-1]) for method, path, _ in requests if "/E1/" in path]
-    assert sent == [("POST", "clear"), ("POST", "value"), ("POST", "value")]
+    sent = [p.rsplit("/", 1)[-1] for method, p, _ in requests if "/E1/" in p and method == "POST"]
+    assert sent == ["clear", "value", "value"]
 
 
 async def test_ios_refuses_a_session_that_reaches_a_real_phone_instead_of_the_simulator() -> None:
@@ -1139,6 +1233,15 @@ async def test_two_options_showing_the_same_text_are_not_guessed_between(
     result = await device.select_option(300, 400, "Home")
     assert (result.selected, result.problem) == (None, "ambiguous")
     assert taps(requests) == []
+
+
+async def test_a_list_that_cannot_be_read_before_the_first_swipe_says_why_and_touches_nothing(
+    quick_scrolling: None,
+) -> None:
+    device, _, requests = countries([f"Country {i}" for i in range(30)], {"locked": True})
+    result = await device.select_option(300, 400, "Country 20")
+    assert (result.selected, result.problem) == (None, "locked")
+    assert gestures(requests) == [] and taps(requests) == []
 
 
 async def test_the_search_for_an_option_gives_up_when_its_time_is_up(

@@ -316,6 +316,8 @@ const zh: Record<MessageKey, Catalog[string]> = {
     "它一直在重复同样的操作，已经停下。告诉它接下来怎么做。",
   "question.stopped.unconfirmed":
     "它的结果和屏幕一直对不上，已经停下。告诉它实际情况，或者接下来怎么做。",
+  "question.stopped.stepFailed":
+    "这一步几次都没做完，它已经停下。让它再试一次。",
   "question.stopped.modelError":
     "模型出错，它已经停下。让它再试一次，或者换个模型。",
   "question.stopped.other": "它在等你。告诉它接下来怎么做。",
@@ -649,6 +651,7 @@ const zh: Record<MessageKey, Catalog[string]> = {
   "timeline.sys.goal": "目标已更新：{goal}",
   "timeline.sys.model": "从下一步起改用 {name}",
   "timeline.sys.modelError": "模型调用失败（{code}）",
+  "timeline.sys.stepFailed": "这一步几次都没做完",
   "timeline.sys.modelRetry": "模型调用失败（{code}），正在重试",
   "timeline.sys.modelFallback": "{previous} 多次失败（{code}），已改用 {name}",
   "timeline.sys.repeating":

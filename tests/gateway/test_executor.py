@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import pytest
 from PIL import Image
 from witx_contracts import gateway as wire
+from witx_contracts.common import LaunchApp
 from witx_gateway import executor
 from witx_gateway.devices.base import DeviceError, TextField, fit_png, png_size
 from witx_gateway.devices.fake import FakeDevice
@@ -130,6 +131,30 @@ async def test_an_app_search_answers_with_matches_and_touches_nothing(tmp_path: 
     assert h.device.inputs == []
     assert h.results()[0]["outcome"] == "returned"
     assert h.results()[0]["apps"] == [{"app_id": "com.huawei.calculator", "name": None}]
+
+
+async def test_an_app_opened_by_name_is_the_best_match_and_the_matches_are_reported(
+    tmp_path: Path,
+) -> None:
+    device = FakeDevice(installed_apps=["com.android.settings", "com.huawei.calculator"])
+    h = Harness(tmp_path, device)
+    await h.executor.action(h.action(input={"kind": "launch_app", "query": "calculator"}))
+    assert h.device.inputs == [("launch_app", "com.huawei.calculator")]
+    assert h.results()[0]["outcome"] == "returned"
+    assert h.results()[0]["apps"] == [{"app_id": "com.huawei.calculator", "name": None}]
+
+
+async def test_a_name_no_installed_app_matches_opens_nothing(tmp_path: Path) -> None:
+    h = Harness(tmp_path, FakeDevice(installed_apps=["com.android.settings"]))
+    await h.executor.action(h.action(input={"kind": "launch_app", "query": "calculator"}))
+    assert h.device.inputs == []
+    assert h.results()[0] == h.results()[0] | {"outcome": "rejected", "reason": "app_not_found"}
+
+
+@pytest.mark.parametrize("launch", [{}, {"app_id": "com.android.settings", "query": "settings"}])
+def test_an_app_is_opened_by_its_id_or_by_name_not_both(launch: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match="app_id or query"):
+        LaunchApp(**launch)
 
 
 async def test_a_screenshot_that_cannot_be_uploaded_is_reported_failed(
@@ -254,6 +279,22 @@ async def test_a_picker_input_with_no_wheel_under_the_point_is_rejected(h: Harne
     assert h.results()[0] == h.results()[0] | {"outcome": "rejected", "reason": "no_picker"}
 
 
+async def test_an_input_that_sent_nothing_comes_back_returned_with_why_not_unknown(
+    tmp_path: Path,
+) -> None:
+    class WheelGone(FakeDevice):
+        async def set_picker(self, x: float, y: float, value: str) -> str | None:
+            return "no_picker"  # the wheel went away after the check: nothing was turned
+
+    h = Harness(tmp_path, WheelGone())
+    await h.executor.action(
+        h.action(input={"kind": "set_picker", "x": 300, "y": 600, "value": "1"})
+    )
+    result = h.results()[0]
+    assert (result["outcome"], result["reason"]) == ("returned", "no_picker")
+    assert [m for m in h.sent if m["type"] == "observation_result"]  # a screenshot follows
+
+
 async def test_a_failed_input_call_is_unknown_not_retried(h: Harness) -> None:
     h.device.fail_next = "connection_lost"
     action = h.action()
@@ -293,6 +334,23 @@ async def test_after_a_crash_an_intended_action_is_reported_unknown(tmp_path: Pa
     assert queued["outcome"] == "unknown"
     await restarted.executor.action(action)  # the cloud resends it
     assert restarted.device.inputs == []
+
+
+async def test_after_a_crash_an_action_received_but_not_intended_is_rejected_and_never_run(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    action = h.action()
+    h.journal.receive(action.action_id, DEVICE_ID, action.digest)  # crash before the intent
+    h.journal.close()
+
+    restarted = Harness(tmp_path)
+    restarted.executor.recover()
+    (queued,) = [json.loads(m) for m in restarted.journal.outbox()]
+    assert (queued["outcome"], queued["reason"]) == ("rejected", "gateway_restarted")
+    await restarted.executor.action(action)  # the cloud resends it
+    assert restarted.device.inputs == []
+    assert restarted.results() == [queued]  # the same result again
 
 
 async def test_stop_raises_a_barrier_and_waits_for_input_in_flight(h: Harness) -> None:
@@ -538,6 +596,13 @@ async def test_a_drag_whose_path_leaves_the_frame_is_refused(h: Harness) -> None
     await h.executor.manual(manual(input=off))
     assert h.device.inputs == []
     assert manual_results(h)[0]["reason"] == "out_of_bounds"
+
+
+async def test_a_persons_typing_that_stopped_short_says_why(h: Harness) -> None:
+    h.device.typing_stops = "no_pinyin_keyboard"
+    await h.executor.manual(manual(input={"kind": "type_text", "text": "你好", "method": "keys"}))
+    result = manual_results(h)[0]
+    assert (result["outcome"], result["reason"]) == ("returned", "no_pinyin_keyboard")
 
 
 async def test_a_person_may_type_into_a_secure_field(h: Harness) -> None:

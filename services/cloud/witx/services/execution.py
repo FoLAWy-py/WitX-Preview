@@ -45,8 +45,8 @@ NOT_FOUND = (
     "Store result, a web suggestion, or a Get / Install button, and never install an app "
     "for the user. If the phone's search does not show it either, the app is not on this "
     "phone: call ask_user to say so, with options (use another phone, or end the "
-    "task); do not open a different app that only looks similar. find_app will not find "
-    "it by searching again."
+    "task); do not open a different app that only looks similar. Searching the installed "
+    "apps again will not find it."
 )
 
 
@@ -235,9 +235,10 @@ async def admit(
         searches = [
             a.found_apps
             for a in reversed(actions)
-            if a.kind == "find_app" and a.device_id == device_id and a.found_apps
+            if a.kind in ("find_app", "launch_app") and a.device_id == device_id and a.found_apps
         ]
-        rank = rules.found_rank(payload["app_id"], searches)
+        # By query it opens the best match, rank 0: it goes ahead, as the best match does.
+        rank = rules.found_rank(payload["app_id"], searches) if payload["app_id"] else 0
     if task.plan_mode:
         rules.check_only_looking(
             kind=payload["kind"],
@@ -480,6 +481,8 @@ async def record_result(
     found: dict[str, Any] = {}
     if outcome == "returned" and locked.kind == "find_app":
         found["found_apps"] = apps or []
+    if outcome == "returned" and locked.kind == "launch_app" and apps:  # opened by query
+        found["found_apps"] = apps
     if outcome == "returned" and locked.kind in ("type_text", "select_option") and field_text:
         found["field_text"] = field_text
     if locked.kind == "type_text" and (field_name is not None or field_box is not None):
@@ -561,17 +564,24 @@ async def resolve_action_call(conn: AsyncConnection, action_id: UUID) -> None:
                     "The phone tapped the option it found showing exactly that text. Check "
                     "on the new screenshot that it is the one you meant."
                 )
-            else:
+            elif action.reason in ("ambiguous", "not_found"):
+                # Any other reason: the phone could not be read before it scrolled, and
+                # nothing was touched; the reason says why.
                 output["note"] = {
                     "ambiguous": "More than one option shows that text, so nothing was "
                     "tapped. Scroll to the one you mean and tap it yourself.",
-                }.get(
-                    action.reason or "",
-                    "No option shows exactly that text; the list was scrolled through and "
-                    "left where it ended. Look at the new screenshot, and use the text the "
-                    "list really shows, or scroll and tap yourself.",
-                )
-        if action.found_apps is not None:
+                    "not_found": "No option shows exactly that text; the list was scrolled "
+                    "through and left where it ended. Look at the new screenshot, and use the "
+                    "text the list really shows, or scroll and tap yourself.",
+                }[action.reason]
+        if action.found_apps is not None and action.kind == "launch_app":
+            output["apps"] = action.found_apps
+            output["note"] = (
+                "The first of these installed apps, the best match, was opened. If it is not "
+                "the app the user meant, open the right one with launch_app by its app_id; "
+                "in ask mode the user confirms it."
+            )
+        elif action.found_apps is not None:
             output["apps"] = action.found_apps
             output["note"] = (
                 "These installed apps match, best first. Open the one the user meant with "
@@ -579,6 +589,8 @@ async def resolve_action_call(conn: AsyncConnection, action_id: UUID) -> None:
                 if action.found_apps
                 else NOT_FOUND
             )
+    if action.reason == "app_not_found":  # launch_app by query: nothing was opened
+        output["note"] = NOT_FOUND
     if action.reason == "wrong_field":
         output["focused_field"] = action.field_info or {}
         output["note"] = (

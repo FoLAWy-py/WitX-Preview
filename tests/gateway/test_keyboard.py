@@ -9,6 +9,7 @@ import httpx
 import pytest
 import witx_gateway.devices.ios as ios_module
 from witx_gateway import keyboard
+from witx_gateway.devices.base import TypeMethod
 from witx_gateway.devices.ios import IOSDevice
 
 from tests.gateway.test_devices import SIMULATOR, Requests, appium
@@ -55,6 +56,8 @@ class Phone:
     pasteboard: str = ""
     pasteboard_writes: bool = True  # False: writes to it do nothing, and say they worked
     takes_paste: bool = True  # False: a paste puts no text in (a picture on the pasteboard)
+    secure: bool = False  # the focused field is a password field
+    focused: bool = True  # False: no field has the focus (it closed)
     menu: tuple[str, ...] = ("Paste", "Select")  # the field's edit menu, as on iOS 27.2
     # An earlier menu, hidden, that the page source still holds before the one in view.
     stale_menu: tuple[str, ...] = ("Cut", "Copy", "Paste")
@@ -288,6 +291,10 @@ def phone_device(phone: Phone, monkeypatch: pytest.MonkeyPatch) -> IOSDevice:
         ok = lambda value: httpx.Response(200, json={"value": value})  # noqa: E731
         if path.endswith("/execute/sync") and body["script"] == "mobile: source":
             return ok(phone.source())
+        if path.endswith("/element/active") and not phone.focused:
+            return httpx.Response(404, json={"value": {"error": "no such element"}})
+        if path.endswith("/element/E1/attribute/type") and phone.secure:
+            return ok("XCUIElementTypeSecureTextField")
         if path.endswith("/elements") and body["using"] == "-ios class chain":
             shown = [n for n, (_, _, seen) in enumerate(phone.menu_items()) if seen]
             if body["value"] == ios_module.PASTE_ITEM:
@@ -465,6 +472,30 @@ async def test_a_long_text_is_deleted_in_rounds_of_the_held_delete_key(
 
 
 # ---------------------------------------------------------------- pasting
+
+
+@pytest.mark.parametrize("method", ["keys", "paste"])
+async def test_nothing_is_tapped_into_a_password_field_the_focus_moved_to_after_the_check(
+    method: TypeMethod, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phone = Phone()
+    device = phone_device(phone, monkeypatch)
+    await device.check_text_target()
+    phone.secure = True  # the form moved on to its password field
+    assert await device.type_text("hunter2", method=method) == "secure_field"
+    assert (phone.text, phone.pasteboard, phone.taps) == ("", "", [])
+
+
+@pytest.mark.parametrize("method", ["keys", "paste"])
+async def test_nothing_is_tapped_or_pasted_when_the_field_is_gone_before_the_first_key(
+    method: TypeMethod, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phone = Phone(kind="latin")  # Chinese would first turn to the pinyin keyboard
+    device = phone_device(phone, monkeypatch)
+    await device.check_text_target()
+    phone.focused = False  # the field closed after the check
+    assert await device.type_text("你好", replace=True, method=method) == "no_focused_field"
+    assert (phone.kind, phone.text, phone.pasteboard, phone.taps) == ("latin", "", "", [])
 
 
 async def test_a_paste_goes_in_through_the_menu_and_leaves_the_pasteboard_empty(
