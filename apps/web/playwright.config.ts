@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-const portText = process.env.WITX_BROWSER_TEST_PORT ?? "5174";
+const portText = process.env.WITX_BROWSER_TEST_PORT ?? "47174";
 const port = Number(portText);
 if (!/^[0-9]{4,5}$/.test(portText) || port < 1024 || port > 65535) {
   throw new Error("Invalid WITX_BROWSER_TEST_PORT");
@@ -13,8 +13,10 @@ export default defineConfig({
     { name: "chromium", use: { browserName: "chromium" } },
     { name: "webkit", use: { browserName: "webkit" } },
   ],
+  // The built app, as deployed: bundled pages load at once, where the dev server compiled
+  // every module on first request, most of a run's time in CI.
   webServer: {
-    command: `pnpm dev --port ${port} --strictPort`,
+    command: `pnpm build && pnpm preview --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: false,
   },

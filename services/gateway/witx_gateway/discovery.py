@@ -1,5 +1,5 @@
 """The devices this Gateway drives, and what each still needs before it can take tasks
-(device pool, #33). Read-only: nothing here installs or changes anything.
+(device pool). Read-only: nothing here installs or changes anything.
 
 Discovery uses the platform tools on this machine: ``adb devices`` for Android,
 ``xcrun devicectl`` for real iPhones and ``xcrun simctl`` for running simulators. Every

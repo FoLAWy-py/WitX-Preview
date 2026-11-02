@@ -3,7 +3,8 @@
 All functions run inside the caller's transaction.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -14,6 +15,7 @@ from witx.config import CatalogModel, Limits
 from witx.domain import rules
 from witx.domain.model import (
     TERMINAL_RUN,
+    ActionStatus,
     Lease,
     PermissionMode,
     Run,
@@ -24,7 +26,8 @@ from witx.domain.model import (
 )
 from witx.domain.rules import Rejected
 from witx.services import execution as exec_service
-from witx.store import devices, identity, runs, side_turns, tasks
+from witx.services import files as file_service
+from witx.store import devices, execution, files, identity, runs, side_turns, tasks
 
 PAUSE_STATES = (TaskStatus.PAUSING, TaskStatus.PAUSED)
 
@@ -42,7 +45,9 @@ async def create_task(
     reasoning_effort: str = "medium",
     timezone: str = "UTC",
     group_id: UUID | None = None,
+    file_ids: Sequence[UUID] = (),
 ) -> Task:
+    """``file_ids``: the person's uploads that come with the first message."""
     await check_mode_allowed(conn, tenant_id, permission_mode)
     if group_id is not None and await tasks.get_group(conn, group_id) is None:
         raise Rejected("not_found", "group not found")
@@ -86,6 +91,7 @@ async def create_task(
         plan_mode=plan is not None,
         group_id=group_id,
     )
+    await file_service.attach(conn, file_ids, task_id=task.id, input_seq=None, user_id=user_id)
     await tasks.add_input(
         conn,
         tenant_id=tenant_id,
@@ -300,6 +306,7 @@ async def add_input(
     run_id: UUID | None = None,
     system: bool = False,
     resume_paused: bool = False,
+    file_ids: Sequence[UUID] = (),
 ) -> Task:
     """Adds a message from the user to the conversation; the main agent reads it on its
     next step. ``/goal …`` also sets the task's goal (the title stays). A message to a
@@ -312,13 +319,16 @@ async def add_input(
     answer to its question; commands are not read in it. Once that sub-agent has
     finished, the message goes to the main agent instead. Sub-agents read nothing
     else from the user; while the main agent waits for them, a message to it starts its
-    side turn, in which it can pass the word on."""
+    side turn, in which it can pass the word on. ``file_ids``: the person's uploads that
+    come with it, for the main agent only."""
     task = await tasks.get(conn, task_id, lock=True)
     if task is None:
         raise Rejected("not_found")
     if task.status == TaskStatus.STOPPING:
         raise Rejected("task_stopping", "wait until the stop completes")
     target = await _sub_agent(conn, task, run_id)
+    if file_ids and target is not None:
+        raise Rejected("invalid_arguments", "files go to the main agent")
     kind = "system" if system else "note"
     if target is not None:
         seq = await tasks.add_input(
@@ -360,6 +370,7 @@ async def add_input(
         revision=task.revision,
         created_by=user_id,
     )
+    await file_service.attach(conn, file_ids, task_id=task.id, input_seq=seq, user_id=user_id)
     await tasks.emit(conn, task, "input.added", seq=seq, kind=kind)
     goal = await _apply_goal(conn, task, command, user_id) if command else None
     if plan is not None:
@@ -422,6 +433,8 @@ async def withdraw_input(conn: AsyncConnection, *, task_id: UUID, seq: int, user
     if not queued:
         raise Rejected("already_read", "the agent has read this message")
     await side_turns.withdraw(conn, task.id, seq, datetime.now(UTC))
+    # Its files are the person's uploads again: sent with the message once more, or purged.
+    await files.detach(conn, task.id, seq)
     await tasks.emit(conn, task, "input.withdrawn", seq=seq)
     updated = await tasks.get(conn, task.id)
     assert updated is not None
@@ -452,7 +465,7 @@ async def steer(conn: AsyncConnection, *, task_id: UUID) -> Task:
     carried out: the run is no longer running when it comes back). An input already on
     the phone finishes first. Nothing happens when no message is queued, so a second
     press does not drop the step that is already reading it; a run waiting for its
-    sub-agents (the messages went to a side turn, D57), paused, or stopped for the
+    sub-agents (the messages went to a side turn), paused, or stopped for the
     person to decide is left as it is."""
     task = await tasks.get(conn, task_id, lock=True)
     if task is None:
@@ -671,6 +684,42 @@ async def stop_acknowledged(conn: AsyncConnection, *, device_id: UUID, stop_id: 
         if task is not None and task.status == TaskStatus.STOPPING:
             await tasks.update(conn, task.id, status=TaskStatus.STOPPED.value)
             await tasks.emit(conn, task, "task.status", status="stopped")
+
+
+@dataclass(frozen=True)
+class ForcedStop:
+    released: list[UUID]  # the devices the task held
+    unknown: list[UUID]  # inputs sent without a result, now of unknown effect
+
+
+async def force_stop(conn: AsyncConnection, *, task_id: UUID, now: datetime) -> ForcedStop:
+    """Completes a stop that no Gateway will confirm, because the Gateway is gone:
+    an operator's last resort, `witx admin force-stop`. An input sent without a result
+    becomes unknown, so its device takes no input until a person settles it from a newer
+    screenshot. Each device's epoch moves on, so whatever its Gateway still sends for the
+    old lease is refused; then the devices are released and the task is stopped, as the
+    confirmation would have done, with ``forced`` on the events."""
+    task = await tasks.get(conn, task_id, lock=True)
+    if task is None:
+        raise Rejected("not_found", "no such task")
+    rules.check_force_stop(task.status)
+    unknown = []
+    for action in await execution.task_actions(conn, task.id):
+        if action.status == ActionStatus.SENT:
+            await execution.fail_observation(conn, action.post_observation_id, "stop_forced")
+            await exec_service.record_result(
+                conn, action, outcome="unknown", reason="stop_forced", finished_at=now
+            )
+            unknown.append(action.id)
+    released = []
+    for lease in await devices.task_leases(conn, task.id):
+        await devices.bump_epoch(conn, lease.device_id)
+        await devices.release_lease(conn, lease.device_id)
+        await tasks.emit(conn, task, "device.released", device_id=lease.device_id, forced=True)
+        released.append(lease.device_id)
+    await tasks.update(conn, task.id, status=TaskStatus.STOPPED.value)
+    await tasks.emit(conn, task, "task.status", status="stopped", forced=True)
+    return ForcedStop(released=released, unknown=unknown)
 
 
 async def finish_run(

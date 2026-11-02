@@ -1,4 +1,4 @@
-"""Browser sessions : an HttpOnly cookie holds a random token; only its hash
+"""Browser sessions: an HttpOnly cookie holds a random token; only its hash
 is stored, so a database leak does not hand out sessions."""
 
 import hashlib

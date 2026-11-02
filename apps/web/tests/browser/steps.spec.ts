@@ -54,7 +54,7 @@ test("a finished round is one line with no count or time; its steps show only wh
   await expect(page.getByText("Policy")).toBeVisible();
 });
 
-test("a step's screenshot shows only when the step is unfolded; opening or searching an app has none", async ({
+test("a step's screenshot shows only when the step is unfolded; opening an app has none", async ({
   page,
 }) => {
   await mockApi(page, []);
@@ -69,13 +69,6 @@ test("a step's screenshot shows only when the step is unfolded; opening or searc
     runs: [{ ...task.runs[0], status: "completed", wait_reason: null }],
     actions: [
       {
-        ...step("a1", "", "2026-10-10T10:00:05Z", "2026-10-10T10:00:07Z"),
-        kind: "find_app",
-        input: { kind: "find_app", query: "王者荣耀" },
-        effect: "no_effect",
-        post_observation_id: "o3",
-      },
-      {
         ...step("a2", "", "2026-10-10T10:00:20Z", "2026-10-10T10:00:25Z"),
         kind: "launch_app",
         input: { kind: "launch_app", app_id: "com.tencent.smoba" },
@@ -87,7 +80,7 @@ test("a step's screenshot shows only when the step is unfolded; opening or searc
         post_observation_id: "o5",
       },
     ],
-    observations: [...task.observations, shot("o3"), shot("o4"), shot("o5")],
+    observations: [...task.observations, shot("o4"), shot("o5")],
   };
   await page.route(detailOf("t1"), (route) =>
     route.fulfill({ json: finished }),
@@ -98,15 +91,14 @@ test("a step's screenshot shows only when the step is unfolded; opening or searc
   await page.getByRole("button", { name: "Worked on the phone" }).click();
   const after = page.getByRole("button", { name: "Screenshot after" });
   await expect(after).toHaveCount(0); // folded into each step
-  for (const name of [/王者荣耀/, /Honor of Kings/])
-    await page.getByRole("button", { name }).click();
+  await page.getByRole("button", { name: /Honor of Kings/ }).click();
   await expect(after).toHaveCount(0);
   await page.getByRole("button", { name: /Start/ }).click();
   const tap = page.getByRole("listitem").filter({ hasText: "Start" });
   await expect(
     tap.getByRole("button", { name: "Screenshot after" }),
   ).toBeVisible();
-  await expect(page.getByText("Policy")).toHaveCount(3);
+  await expect(page.getByText("Policy")).toHaveCount(2);
 });
 
 test("a step under way or waiting for you says so nowhere in its line; one that ended otherwise says how", async ({

@@ -1,4 +1,4 @@
-"""Restoring the database from a backup : `witx admin recover` replays
+"""Restoring the database from a backup: `witx admin recover` replays
 what happened since the backup and stops what was in flight, so nothing deleted, revoked
 or half-done comes back to life."""
 

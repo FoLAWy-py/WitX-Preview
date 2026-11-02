@@ -163,9 +163,9 @@ class AppiumDevice:
         capabilities: dict[str, Any],
         keep_warm: bool,
     ) -> None:
-        """Applies the device's settings from the Gateway's configuration while it runs
-        : what the next report says and the next session is opened with. A session
-                that is open stays as it is, so a device in the middle of a task is not touched."""
+        """Applies the device's settings from the Gateway's configuration while it runs:
+        what the next report says and the next session is opened with. A session
+        that is open stays as it is, so a device in the middle of a task is not touched."""
         self.name = name
         self.sensitive_apps = list(sensitive_apps)
         self._extra_capabilities = dict(capabilities)
@@ -537,13 +537,18 @@ class AppiumDevice:
         time, and taps the option when exactly one shows ``value``. Scrolling changes
         nothing but what is in view, so running out of time or list ends in "not_found"
         without a tap. Up to the first swipe or tap it only reads: a screen that cannot be
-        read by then is a problem, not a failure, as nothing was touched."""
-        deadline = time.monotonic() + SELECT_BUDGET
+        read by then is a problem, not a failure, as nothing was touched. The time is up
+        at SELECT_BUDGET even in the middle of a read or a swipe, so a slow phone cannot
+        carry the search past the executor's timeout, which makes the input unknown."""
+        deadline = asyncio.get_running_loop().time() + SELECT_BUDGET
         try:
-            state = await self.state()
-            options = await self._resting_options()
+            async with asyncio.timeout_at(deadline):
+                state = await self.state()
+                options = await self._resting_options()
         except DeviceError as error:
             return Selection(problem=error.reason)
+        except TimeoutError:
+            return Selection(problem="timeout")
         screen = (state.input_width, state.input_height)
         span = SWIPE_SPAN * screen[1]
         top = min(max(y - span / 2, 0.05 * screen[1]), 0.95 * screen[1] - span)
@@ -555,15 +560,19 @@ class AppiumDevice:
 
         verdict, found = find_option(options, value, screen)
         swipes = 0
-        for forward in (True, False):  # down the list to its end, then back up to its start
-            while verdict == "missing" and swipes < SELECT_SWIPES and time.monotonic() < deadline:
-                before = signature(options)
-                start, end = (top + span, top) if forward else (top, top + span)
-                await self.swipe(x, start, x, end, 600, hold_ms=SCROLL_STOP_MS)
-                swipes += 1
-                verdict, found, options = await look()
-                if signature(options) == before:  # it did not move: the end of the list
-                    break
+        try:
+            async with asyncio.timeout_at(deadline):
+                for forward in (True, False):  # down the list to its end, then back up
+                    while verdict == "missing" and swipes < SELECT_SWIPES:
+                        before = signature(options)
+                        start, end = (top + span, top) if forward else (top, top + span)
+                        await self.swipe(x, start, x, end, 600, hold_ms=SCROLL_STOP_MS)
+                        swipes += 1
+                        verdict, found, options = await look()
+                        if signature(options) == before:  # it did not move: the list's end
+                            break
+        except TimeoutError:
+            verdict = "missing"
         if verdict == "found" and found is not None:
             await self.tap(*found.center)
             return Selection(selected=found.text)

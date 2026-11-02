@@ -1,4 +1,4 @@
-"""Deleting tasks and retention ."""
+"""Deleting tasks and retention."""
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -278,7 +278,6 @@ async def test_a_task_with_an_unknown_effect_cannot_be_deleted_until_reconciled(
     rig.model.script = [
         [call("observe", device_id=device)],
         lambda r: tap(r, device),
-        [call("ask_user", question="Did the tap happen?")],
     ]
     task = await rig.create_task(device_ids=[device])
     await rig.settle()

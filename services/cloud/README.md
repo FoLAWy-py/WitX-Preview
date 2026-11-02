@@ -5,7 +5,7 @@ The WitX cloud: HTTP API, Gateway hub and agent worker. See
 
 ```sh
 witx migrate                 # apply migrations (WITX_ADMIN_DATABASE_URL)
-witx api                     # API + hub on :8000
+witx api                     # API + hub on :47100
 witx worker                  # agent worker
 witx admin add-user --tenant demo --subject alice --name Alice
 witx admin add-gateway --tenant demo --name laptop   # prints a one-time enrollment code

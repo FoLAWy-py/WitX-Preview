@@ -1,0 +1,36 @@
+# The WitX iPhone app. `make ios-project` generates WitX.xcodeproj from this file;
+# the project itself is not kept in git.
+name: WitX
+options:
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    # Set on the command line (see docs/development.md): your team, and a bundle ID suffix
+    # that makes the ID yours, as the Gateway's WebDriverAgent does.
+    DEVELOPMENT_TEAM: ""
+    WITX_BUNDLE_SUFFIX: dev
+    # The one server the app downloads from: where the phone reaches the cloud.
+    WITX_SERVER_ORIGIN: "http://127.0.0.1:47088"
+packages:
+  WitXDownloads:
+    path: WitXDownloads
+targets:
+  WitX:
+    type: application
+    platform: iOS
+    sources:
+      - path: WitX
+        excludes: [Info.plist]
+    dependencies:
+      - package: WitXDownloads
+    settings:
+      base:
+        INFOPLIST_FILE: WitX/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.witx.app.$(WITX_BUNDLE_SUFFIX)
+        PRODUCT_NAME: WitX
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"

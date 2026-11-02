@@ -14,7 +14,6 @@ from witx.api.deps import (
     IdempotencyKey,
 )
 from witx.services import execution as exec_service
-from witx.services import lifecycle
 from witx.services import purchases as purchase_service
 from witx.services.identity import Actor
 from witx.store import execution, tasks
@@ -103,21 +102,13 @@ def routes(d: Deps) -> APIRouter:
         async with d.db.tenant(who.tenant_id) as conn:
 
             async def write() -> api.ActionView:
+                # The ruling reaches the agent as the input's result.
                 action = await exec_service.reconcile(
                     conn,
                     action_id=action_id,
                     effect=body.effect,
                     observation_id=body.observation_id,
                     user_id=who.user_id,
-                )
-                await lifecycle.add_input(
-                    conn,
-                    task_id=action.task_id,
-                    user_id=who.user_id,
-                    text=f"I checked action {action.id}: its effect was "
-                    f"{body.effect.replace('_', ' ')} (see screenshot {body.observation_id}).",
-                    run_id=action.run_id,
-                    system=True,
                 )
                 return views.action_view(
                     action, await execution.get_approval(conn, action_id), datetime.now(UTC)

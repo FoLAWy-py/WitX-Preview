@@ -1,4 +1,4 @@
-"""The browser side of a takeover : one WebSocket per takeover.
+"""The browser side of a takeover: one WebSocket per takeover.
 
 The browser authenticates in its first message, then receives frames (a JPEG every
 FRAME_INTERVAL or so) and sends input. Each input names the frame its coordinates

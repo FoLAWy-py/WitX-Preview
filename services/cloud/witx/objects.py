@@ -1,4 +1,5 @@
-"""Private object storage for screenshots (filesystem for development, S3 for deployment)."""
+"""Private object storage for screenshots and the files a person gives a task (filesystem
+for development, S3 for deployment)."""
 
 import asyncio
 import hashlib
@@ -22,6 +23,11 @@ def screenshot_key(tenant_id: UUID, observation_id: UUID) -> str:
     return f"{tenant_id}/observations/{observation_id}.png"
 
 
+def file_key(tenant_id: UUID, file_id: UUID) -> str:
+    """Where a file a person gave a task is kept."""
+    return f"{tenant_id}/files/{file_id}"
+
+
 class ObjectNotFound(Exception):
     pass
 
@@ -30,6 +36,10 @@ class ObjectStore(Protocol):
     async def put(self, key: str, data: bytes, content_type: str) -> None: ...
 
     async def get(self, key: str) -> bytes: ...
+
+    async def get_range(self, key: str, start: int, end: int) -> bytes:
+        """Bytes ``start`` to ``end``, both inclusive: a file is served in parts."""
+        ...
 
     async def delete(self, key: str) -> None:
         """Removes the object; deleting a missing one is not an error (retries)."""
@@ -72,6 +82,17 @@ class LocalObjectStore:
     async def get(self, key: str) -> bytes:
         try:
             return await asyncio.to_thread(self._path(key).read_bytes)
+        except FileNotFoundError:
+            raise ObjectNotFound(key) from None
+
+    async def get_range(self, key: str, start: int, end: int) -> bytes:
+        def read() -> bytes:
+            with self._path(key).open("rb") as f:
+                f.seek(start)
+                return f.read(end - start + 1)
+
+        try:
+            return await asyncio.to_thread(read)
         except FileNotFoundError:
             raise ObjectNotFound(key) from None
 
@@ -151,6 +172,16 @@ class S3ObjectStore:
     async def get(self, key: str) -> bytes:
         path = self._path(key)
         headers = self._signed_headers("GET", path, b"", {})
+        response = await self.client.get(self.endpoint + path, headers=headers)
+        if response.status_code == 404:
+            raise ObjectNotFound(key)
+        response.raise_for_status()
+        return response.content
+
+    async def get_range(self, key: str, start: int, end: int) -> bytes:
+        path = self._path(key)
+        headers = self._signed_headers("GET", path, b"", {})
+        headers["range"] = f"bytes={start}-{end}"  # not signed: S3 allows it either way
         response = await self.client.get(self.endpoint + path, headers=headers)
         if response.status_code == 404:
             raise ObjectNotFound(key)

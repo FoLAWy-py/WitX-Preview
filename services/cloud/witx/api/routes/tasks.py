@@ -66,9 +66,9 @@ def read_cursor(cursor: str) -> tuple[datetime, UUID]:
 
 
 def saying_frames(before: dict[UUID, Saying], now: dict[UUID, Saying]) -> list[bytes]:
-    """The ``agent.saying`` frames for what changed in what the runs say or are at
-    . They carry no ``id``: not events, not kept, not resent after a reconnect; an
-        empty text with no phase says a run's step is over."""
+    """The ``agent.saying`` frames for what changed in what the runs say or are at.
+    They carry no ``id``: not events, not kept, not resent after a reconnect; an
+    empty text with no phase says a run's step is over."""
     over = Saying("", None)
     changed = [(run_id, over) for run_id in before.keys() - now.keys()]
     changed += [(run_id, s) for run_id, s in now.items() if before.get(run_id) != s]
@@ -209,6 +209,7 @@ def routes(d: Deps) -> APIRouter:
                     reasoning_effort=effort,
                     timezone=body.timezone,
                     group_id=body.group_id,
+                    file_ids=body.file_ids,
                 )
                 return await views.task_detail(conn, task)
 
@@ -284,6 +285,7 @@ def routes(d: Deps) -> APIRouter:
                     text=body.text,
                     run_id=body.run_id,
                     resume_paused=body.resume,
+                    file_ids=body.file_ids,
                 )
                 return await views.task_detail(conn, task)
 

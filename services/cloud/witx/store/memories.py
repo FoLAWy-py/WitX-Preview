@@ -1,4 +1,4 @@
-"""Long-term memory : entries kept for a person's own future tasks,
+"""Long-term memory: entries kept for a person's own future tasks,
 written by them or by an agent on its own."""
 
 from collections import defaultdict

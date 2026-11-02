@@ -112,3 +112,39 @@ def device_wait_failed(devices: Sequence[Device]) -> str:
         f"{', '.join(d.name for d in devices)} could not be used for {minutes} minutes "
         f"({', '.join(sorted(why))}); reconnect it and send a message to go on."
     )
+
+
+# The API process serving a Gateway says it is still connected this often. A Gateway not
+# heard from for GATEWAY_SILENCE is gone, whether or not a process saw it leave: a
+# process that was killed never marks its Gateways' devices offline, and no other process
+# knows which Gateways it held.
+GATEWAY_HEARTBEAT = timedelta(seconds=30)
+GATEWAY_SILENCE = timedelta(seconds=90)
+
+
+def gateway_silent_since(now: datetime) -> datetime:
+    """Gateways last heard from before this are gone, and their devices offline."""
+    return now - GATEWAY_SILENCE
+
+
+def comes_back(problems: Sequence[str]) -> bool:
+    """Whether a removed device its Gateway reports again is shown again: only when
+    the Gateway has it connected. A Gateway also reports a device of its configuration it
+    cannot find, as ``disconnected``; that one stays removed."""
+    return "disconnected" not in problems
+
+
+def check_device_removable(
+    *, online: bool, problems: list[str], held: bool, unknown_pending: bool
+) -> None:
+    """A device can be removed once it is gone: its Gateway does not have it
+    connected, no task or takeover holds it, and no input on it waits for a person's
+    ruling (removing it would hide that ruling)."""
+    if online and "disconnected" not in problems:
+        raise Rejected("device_connected", "only a device that is not connected can be removed")
+    if held:
+        raise Rejected("device_in_use", "a task or a takeover holds this device")
+    if unknown_pending:
+        raise Rejected(
+            "unknown_effect_pending", "settle the unknown input on it from a new screenshot first"
+        )

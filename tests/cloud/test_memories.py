@@ -1,4 +1,4 @@
-"""Long-term memory : the agent keeps what it learns on its own,
+"""Long-term memory: the agent keeps what it learns on its own,
 only for the person who started the task, never secrets; notes about an app come when
 the agent first sees that app; the person can turn it off."""
 

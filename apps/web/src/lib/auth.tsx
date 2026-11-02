@@ -23,7 +23,7 @@ const AuthContext = createContext<Auth | null>(null);
 
 /**
  * The browser holds no token: an HttpOnly session cookie, set by the server when
- * signing in, signs every request . Being signed in means /me answers.
+ * signing in, signs every request. Being signed in means /me answers.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null | undefined>(undefined);

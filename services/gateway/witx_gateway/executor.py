@@ -4,14 +4,12 @@ Checks before any input, in order: known device, current epoch, no stop barrier,
 not expired, supported input, an installed app, the screen still matches the screenshot
 the coordinates were chosen on, and a picker wheel lies under a picker input. Only
 then is ``intent`` journaled and the device touched.
-
-``find_app`` only reads the list of installed apps: it answers after the first checks
-and never journals intent, so it cannot leave an unknown effect behind.
 """
 
 import asyncio
 import base64
 import contextlib
+import functools
 import hashlib
 import logging
 from collections.abc import Awaitable, Callable
@@ -23,12 +21,12 @@ from witx_contracts import gateway as wire
 from witx_contracts.common import (
     Back,
     DoubleTap,
-    FindApp,
     Home,
     LaunchApp,
     Lock,
     LongPress,
     Pinch,
+    ReceiveFile,
     SelectOption,
     SetPicker,
     Swipe,
@@ -61,13 +59,14 @@ INPUT_TIMEOUT = 30
 # Text tapped in on the keyboard (up to KEYS_MOST characters, a few a second) or pasted
 # into a field emptied first with the delete key held, a few seconds a round.
 KEYS_TIMEOUT = 120
-# Looking for an option in a long list scrolls for up to devices.appium.SELECT_BUDGET.
+# Looking for an option in a long list reads and scrolls for at most
+# devices.appium.SELECT_BUDGET; the tap on the option it found has the rest.
 SELECT_TIMEOUT = 60
 # A list can keep moving after a swipe lets go of it (a fling). The screenshot that
 # follows must show where it came to rest, or the agent aims its next tap at an item that
 # has moved on: on Android 8 of 10 shots taken at once were still moving. Wait until two
 # shots in a row agree, but not for a screen that never rests (video, a carousel).
-# A phone whose driver answers an input before the app has settled (iOS, D64) gets this
+# A phone whose driver answers an input before the app has settled (iOS) gets this
 # after every input, not only a swipe: a tap's transition is still playing when it answers.
 SETTLE_POLL = 0.1
 SETTLE_MAX = 1.5
@@ -326,13 +325,6 @@ class Executor:
             command = message.input
             if command.kind not in device.capabilities:
                 raise Rejected("unsupported_input")
-            if isinstance(command, FindApp):
-                found = apps.match(command.query, await device.list_apps())
-                return (
-                    "returned",
-                    None,
-                    {"apps": [wire.FoundApp(app_id=a, name=n) for a, n in found]},
-                )
             if isinstance(command, TypeText):
                 if command.method not in device.type_methods:
                     raise Rejected("unsupported_method")
@@ -341,9 +333,17 @@ class Executor:
                     point = to_input(command.field_x, command.field_y, message.expected)
                 # Secrets, missing focus and the wrong field stop here.
                 await device.check_text_target(point)
+            link: tuple[str, str] | None = None  # receive_file: the deep link, the WitX app
+            if isinstance(command, ReceiveFile):
+                if command.url is None or command.sha256 is None:
+                    raise Rejected("invalid_input")
+                witx = apps.witx_app(await device.list_apps())
+                if witx is None:
+                    raise Rejected("witx_app_missing")
+                link = (apps.download_link(command.url, command.sha256), witx)
             opened: dict[str, Any] = {}  # by query: what matched, the opened one first
             if isinstance(command, LaunchApp):
-                if command.query is not None:  # the best match, as find_app ranks them
+                if command.query is not None:  # the best match (apps.match)
                     matches = apps.match(command.query, await device.list_apps())
                     if not matches:
                         raise Rejected("app_not_found")
@@ -362,7 +362,11 @@ class Executor:
                 await device.check_picker_target(*to_input(command.x, command.y, expected))
             if isinstance(command, SelectOption):
                 to_input(command.x, command.y, expected)  # the point must be on the screenshot
-            run = self._prepare(device, command, expected)
+            run = (
+                functools.partial(device.open_link, *link)
+                if link is not None
+                else self._prepare(device, command, expected)
+            )
             # The checks above wait on the device: a stop, a new lease or the deadline may
             # have come meanwhile, and no input starts after them (``barrier``). Nothing is
             # awaited from here to the intent.

@@ -1,121 +1,210 @@
-# WitX — Developer Preview
+# WitX
 
-简体中文 | [English](README.en.md)
+**Tell an agent what to do on your phone — and stay in charge of every step that matters.**
 
-WitX 让你在网页里用自然语言操作自己的 Android 和 iOS 手机。说清楚要做什么，Agent 会看手机截图、安排步骤，再通过手机旁的 Gateway 执行。你可以查看过程、批准敏感操作，也可以暂停任务后亲自接管。
+English | [简体中文](README.zh-CN.md)
 
-它面向个人自部署、自用。这个 Preview 适合愿意配置服务、连接测试设备的开发者；请先用测试账号体验，并检查重要任务的结果。
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+![Status: developer preview](https://img.shields.io/badge/status-developer%20preview-orange.svg)
+![Phones: Android · iOS](https://img.shields.io/badge/phones-Android%20%C2%B7%20iOS-informational.svg)
+![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-success.svg)
 
-## 可以用来做什么
+WitX is a self-hosted agent that operates your own Android and iOS phones — real devices or emulators — from a chat in your browser. You describe a goal; the agent looks at screenshots, plans, and taps, types and swipes through a small Gateway running next to the phones. Anything sensitive — paying, deleting, sharing personal data — stops and waits for you, showing the exact terms you are approving.
 
-- **完成手机上的多步任务**：查找信息、填写表单、修改设置，也可以把不同子任务交给多台手机。
-- **先计划，再执行**：不确定怎么做时，先用计划模式查看方案，再决定是否执行。
-- **保留常用方法**：让 Agent 把完成任务的方法整理成 Skill，自己检查、试用和保存，以后再用。
-- **保持人在掌控中**：选择任务权限，遇到需要批准的操作时确认，必要时暂停、停止或接管手机。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/task-approval-dark.png">
+  <img alt="A WitX task waiting for approval: the agent wants to place a ¥42.50 order at Corner Shop, and the card shows exactly what the approval covers next to the phone's live screen." src="docs/images/task-approval-light.png">
+</picture>
 
-界面支持英文和简体中文、浅色和深色主题。Agent 跟随你最新消息的语言回复。长对话先显示最近的内容，向上滚动即可查看更早的过程。
+<sub>The agent reached checkout and stopped. Your approval is bound to these exact terms: if the amount or recipient changes, it no longer counts.</sub>
 
-## 开始前
+## Why WitX
 
-你需要 Python 3.12+、uv、Node.js 22+、pnpm 10.33.0 和 PostgreSQL 15+。本仓库包含 Web、云端服务、Gateway、测试和部署模板。
+Most phone automation is either brittle scripts or an agent you have to trust blindly. WitX is built around a different deal:
 
-先用下面的**假设备**检查服务是否连通，不必立即连接手机。接入真实设备时，Android 需要 ADB 与 Appium UiAutomator2；iOS 需要 macOS、Xcode 与 Appium XCUITest，真机还需要签名和开发者模式。配置步骤见[开发与部署](docs/development.md#配置与真实设备)。
+- **It works on real apps.** No APIs or integrations needed: if you can do it by hand on the phone, the agent can try it.
+- **You decide what needs you.** Choose a permission mode per task. Payments always wait for an explicit approval that is bound to the amount, recipient and screen.
+- **Every input runs at most once.** If the outcome of a tap is unclear, the device stops until you look at a fresh screenshot and say what happened — the agent never "just retries" a payment.
+- **You can grab the wheel.** Pause a task and take over the phone from your browser at any time. Stopping waits until the phone confirms it has stopped.
+- **Your data stays on your machines.** One person, one deployment. Screenshots and task text go only to the model providers you configure.
 
-模型费用由你自己的供应商账户支付。手机截图和任务内容会发送给你配置的模型供应商；请勿使用包含私人消息、支付信息或其他敏感内容的日常手机。
+## Features
 
-## 先在本机跑起来
+| | |
+| --- | --- |
+| 📱 **Real phones** | Android (UiAutomator2) and iOS (XCUITest), physical devices or emulators/simulators. New devices are discovered automatically. |
+| 🧠 **Conversational tasks** | Plain-language goals, follow-up messages while it works, `/goal` to change direction, `/plan` to review an approach before anything is changed. |
+| 📲 **Several phones at once** | Sub-agents split a task across devices, e.g. compare prices on two phones. |
+| ✅ **Approvals with exact terms** | Purchases show payee, address, amount and the screen they came from; you type the amount to confirm. |
+| 🖐 **Take over** | Live screen and input in the browser, sharing the same device lock as the agent. |
+| 🧩 **Skills & Plugins** | `/skill` turns a finished task into a reusable method you review and save. Text-only Plugins install from a marketplace after you read them. |
+| ⏰ **Schedules** | Run a task at a local time, once or repeatedly. |
+| 📎 **Files** | Attach files to a task; the agent can hand one to an iPhone through the WitX app. |
+| 🔌 **MCP** | Other agents (e.g. Claude Code) can start and follow WitX tasks over MCP — approvals still stay with people. |
+| 🌗 **Polished UI** | English & Simplified Chinese, light & dark, works on phone-sized screens. |
 
-### 1. 安装并配置
+## Project status
 
-先按[数据库说明](docs/development.md#数据库)创建数据库和角色，然后在仓库根目录运行：
+WitX is a **developer preview**: it works end to end and every change runs through 1,000+ Python tests plus web unit and browser tests in Chromium and WebKit, but expect rough edges and breaking changes.
+
+| Area | Status |
+| --- | --- |
+| Android phones & emulators | ✅ Supported |
+| iPhone & iOS simulators | ✅ Supported (physical devices need WebDriverAgent signing and Developer Mode) |
+| Gateway host | ✅ macOS, Linux · ⚠️ Windows not validated |
+| Approvals, take over, UNKNOWN rulings, stop barrier | ✅ Supported, with behavior tests |
+| Multi-phone tasks, schedules, memory, Skills & Plugins | ✅ Supported |
+| Docker Compose deployment with OIDC + HTTPS | ✅ Supported |
+| Sending files to the phone | 🧪 iPhone only, needs the WitX app built from `apps/ios` · ⏳ Android not yet |
+| Prebuilt iPhone app / App Store | ⏳ Not available — build it with Xcode |
+| Teams / multi-user collaboration | 🚫 Not a goal — WitX is for one person's own phones |
+
+### Recent improvements (2026-11-02)
+
+- **Files:** give a task up to 10 files (100 MiB each); the agent can deliver one to an iPhone, where the new thin WitX app downloads and checks it.
+- **Clearer UNKNOWN handling:** when an input's effect is unknown, the run waits for your ruling once and receives it as the input's result.
+- **Device housekeeping:** devices that are gone are set apart and can be removed; a Gateway that vanished without saying so is marked offline after 90 s; `witx admin force-stop` finishes a stop whose Gateway is gone for good.
+- **Leaner model calls:** each call carries only the tools the run can use; the separate app search tool is gone.
+- **UI:** time markers in the conversation, "N need you" jumps to waiting tasks, one search across Skills and Plugins, file limits shown before you pick.
+- **Language:** the agent is told the language you write in.
+- **Fixes:** the browser opens the address it was given; Android opens the app, not a system component; option searches stop on time.
+- **Dev ports** moved to 47100 (API) and 47173 (web) to avoid clashing with common tools.
+
+Full history: [CHANGELOG.md](CHANGELOG.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+  B[Browser<br/>chat · approvals · take over] -->|HTTPS| API
+  subgraph Cloud [Your server]
+    API[API + Hub] --- DB[(PostgreSQL)]
+    W[Worker<br/>agent loop · risk check] --- DB
+    API --- OS[(Object store<br/>screenshots · files)]
+  end
+  W -->|model calls| M[Model provider]
+  G[Gateway<br/>next to the phones] -->|outbound WebSocket| API
+  G -->|Appium| P1[Android]
+  G -->|Appium| P2[iPhone]
+```
+
+1. The model proposes an input from the latest screenshot and says what it expects to happen.
+2. A separate risk check and pure policy rules decide whether it may run or must wait for you.
+3. The Gateway re-checks the device, screen and lease right before acting, records the intent in a local journal, and executes it once.
+4. A new screenshot comes back. If the outcome can't be known, the device waits for your ruling.
+
+The Gateway only connects outward, so phones never need open ports. More in [docs/architecture.md](docs/architecture.md) (Chinese).
+
+## Quick start
+
+You'll need **Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+, pnpm 10.33, PostgreSQL 15+**, and an API key for a model with vision and tool calling. The steps below use a **fake phone** so you can check everything is wired up before connecting a real one.
+
+> 🤖 **Prefer to let a coding agent do it?** Jump to [Set up with an agent](#set-up-with-an-agent).
+
+**1. Install and configure**
 
 ```sh
+git clone https://github.com/FoLAWy-py/WitX-Preview.git && cd WitX-Preview
 make setup
-cp .env.example .env
+cp .env.example .env                                   # set OPENAI_API_KEY and WITX_DEFAULT_MODEL
 cp services/gateway/gateway.fake.toml gateway.toml
 ```
 
-编辑 `.env`，填好数据库连接、模型密钥和 `WITX_DEFAULT_MODEL`。本机体验使用 `WITX_AUTH=dev`；模型名称请改成你的账户可以调用、支持视觉和工具调用的型号。
-
-### 2. 初始化并注册
+**2. Create the database** (local trust auth assumed; use real passwords anywhere else)
 
 ```sh
+psql -d postgres -c "CREATE ROLE witx_owner LOGIN CREATEROLE" \
+                 -c "CREATE ROLE witx_app_login LOGIN" \
+                 -c "CREATE DATABASE witx OWNER witx_owner"
 set -a; . ./.env; set +a
 make db-migrate
 psql "$WITX_ADMIN_DATABASE_URL" -c 'GRANT witx_app TO witx_app_login'
 uv run witx admin add-user --tenant demo --subject alice --name Alice
-uv run witx admin add-gateway --tenant demo --name test-host
+uv run witx admin add-gateway --tenant demo --name test-host   # prints a one-time code
 ```
 
-保存最后一条命令打印的一次性注册码，下一步注册 Gateway 时要用。
+**3. Start the services** — one terminal each, running `set -a; . ./.env; set +a` first in the API and Worker terminals:
 
-### 3. 启动服务
-
-在三个终端分别启动以下服务。API 和 Worker 的终端都先运行 `set -a; . ./.env; set +a`，加载配置。
-
-| 终端 | 命令 |
+| Terminal | Command |
 | --- | --- |
 | API | `make dev-api` |
 | Worker | `make dev-worker` |
 | Web | `make dev-web` |
+| Gateway | `uv run witx-gateway --config gateway.toml enroll` (paste the code, once), then `make dev-gateway GATEWAY_CONFIG=gateway.toml` |
 
-等 API 启动后，在第四个终端注册并启动 Gateway。注册时按提示粘贴注册码，只需做一次。
+**4. Open [http://127.0.0.1:47173](http://127.0.0.1:47173)**, sign in with `dev-token-alice`, and enable *Preview fake phone* on the Devices page. The fake phone just changes the color of a synthetic screen — it proves the loop works, not that apps do.
+
+**5. Connect a real phone** using [gateway.example.toml](services/gateway/gateway.example.toml), then let the Gateway check and fix the host:
 
 ```sh
-uv run witx-gateway --config gateway.toml enroll
-make dev-gateway GATEWAY_CONFIG=gateway.toml
+uv run witx-gateway --config gateway.toml doctor   # read-only checks
+uv run witx-gateway --config gateway.toml setup    # proposes fixes, asks before each
 ```
 
-打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)，使用示例令牌 `dev-token-alice` 登录，在设备页启用假设备。它只会改变合成画面的颜色，用来确认链路正常，不会模拟真实 App。
+Use a spare phone or test accounts at first: screenshots go to your model provider, and models make mistakes.
 
-准备连接手机时，改用[真实设备配置](services/gateway/gateway.example.toml)，按[设备接入说明](docs/development.md#配置与真实设备)检查环境。
+### Set up with an agent
 
-## 怎样使用
+Paste this into Claude Code, Codex or a similar coding agent opened in the repository:
 
-创建任务时选择手机和模型，写清楚目标、范围，以及哪些事情需要先问你。可以先从读取信息或修改测试数据的小任务开始。
+```text
+Set up WitX-Preview for local development on this machine and get it running with the fake phone.
 
-每个任务可以选择权限模式：
+Read README.md (Quick start), docs/development.md and AGENTS.md first, then:
+1. Check the prerequisites: Python 3.12+, uv, Node.js 22+, pnpm 10.33, PostgreSQL 15+ running locally.
+   If something is missing, tell me what and how you would install it, and wait for my OK.
+2. Run `make setup`. Create .env from .env.example and gateway.toml from
+   services/gateway/gateway.fake.toml. Ask me for the model API key and the model name
+   (WITX_DEFAULT_MODEL); write them into .env yourself and never print the key back.
+3. Create the PostgreSQL roles and database as in the Quick start (ask me first if my
+   local PostgreSQL needs a password or different superuser), run `make db-migrate`,
+   the GRANT, and add the user `alice` and a gateway `test-host` in tenant `demo`.
+4. Start the API, Worker and Web dev servers as background processes with .env loaded,
+   enroll the Gateway with the one-time code (pipe it on stdin), then start the Gateway.
+   If ports 47100 or 47173 are taken, stop and tell me what is using them.
+5. Verify: `curl -H "Authorization: Bearer dev-token-alice" http://127.0.0.1:47173/api/v1/devices`
+   should list "Preview fake phone" with "online": true.
+6. Tell me how to open the app and enable the device, how to stop everything, and where the logs are.
 
-| 模式 | 如何处理操作 |
+Rules: do not connect real phones, install system packages, or change anything outside this
+repository and the local database without asking. Do not commit .env, gateway.toml or journals.
+```
+
+## Using WitX
+
+Pick the phones, model and permission mode when you create a task, then describe the goal, its limits, and anything the agent should ask you first.
+
+| Permission mode | What waits for you |
 | --- | --- |
-| 先问我 | 改动数据前先问你，查看和导航可以直接进行。 |
-| 替我审批（默认） | 消息和下单可以直接执行；付款、删除、分享个人数据、修改账户等操作先问你。 |
-| 完全访问 | 放开其他操作的逐项审批，付款和转账仍要批准；需要 Owner 先开启。 |
+| **Ask first** | Anything that changes data; looking around runs. |
+| **Approve for me** (default) | Payments, deletions, sharing personal data, account changes, inputs in sensitive apps, and anything the risk check could not assess. Messages and orders paid for in a later step go ahead. |
+| **Full access** | Only payments and transfers. The Owner must enable this mode first. |
 
-需要手动操作时，先暂停任务，再接管手机。密码、验证码和支付验证由你处理，不要写进对话或交给 Agent。
-
-几个常用入口：
-
-- `/goal`：设置或修改任务目标。
-- `/side`：针对当前任务提问，旁问只回答，不操作手机。
-- `/skill`：请 Agent 起草本次任务的操作方法。你可以要求拆成多个 Skill，逐份检查后保存。
-
-也可以[安装可选 Plugin](https://github.com/FoLAWy-py/witx-plugins-preview)，给 Agent 提供现成的方法：
+Handy commands in the message box: `/goal` (set, pause or clear the goal), `/plan` (plan first, approve before changes), `/skill` (draft a reusable Skill from this task), `/schedule`, `/constraints`, and `$name` to ask for a specific Skill. Optional Plugins come from the [Preview marketplace](https://github.com/FoLAWy-py/witx-plugins-preview):
 
 ```sh
-uv run witx plugin install basics
+uv run witx plugin install basics    # shows the full text and asks before installing
 ```
 
-安装和更新前会展示内容，由你确认。自己写的 Skill 和 Plugin 都不会自动获得额外权限。
+## Things to know
 
-## 使用前要知道
+- **Check the results.** Models misread screens and miss requirements; pages change between screenshots. A completed task is not proof that every requirement was met.
+- **Passwords, verification codes and payment verification are yours.** The agent can't type into system password fields, but ordinary code fields, custom controls and anything visible in a screenshot are not fully protected. Enter those yourself via take over.
+- **Unknown outcomes need a fresh look.** Don't simply redo an operation whose result is unknown; resolve it from a newer screenshot.
+- **Deleting a task doesn't delete everything.** Memories, Skills and backups have their own retention.
+- **Compatibility varies** with phone OS versions, Appium drivers, signing and the apps themselves.
 
-- **结果需要检查。** 模型可能看错、点错或漏掉要求；页面也可能在两次截图之间变化。完成提示不代表每个要求都已满足。
-- **遇到“结果未知”先核实。** 设备会等待你凭新截图确认发生了什么，不要直接重复同一操作。停止任务也需要等待设备确认。
-- **敏感内容仍可能出现在截图中。** 系统识别的密码框会阻止 Agent 输入，但普通验证码框、自绘控件和截图里的验证码尚未完全保护。
-- **删除任务不等于删除所有副本。** 已保存的记忆、Skill 和既有备份需要分别管理。
-- **真实设备仍有兼容性限制。** Gateway 宿主支持 macOS 和 Linux；Windows 尚未验收。具体体验受手机系统、Appium 驱动、签名和 App 本身影响。
+## Documentation
 
-## 部署、开发与反馈
+- [Development & deployment](docs/development.md) — real devices, iPhone app, Docker Compose, HTTPS, upgrades, backup & restore (Chinese)
+- [Architecture](docs/architecture.md) — components, action lifecycle, safety and recovery (Chinese)
+- [AGENTS.md](AGENTS.md) — engineering rules for contributors and coding agents
+- `make check` runs lint, type checks, all tests and builds. Default tests use fake models and fake devices: no paid model calls, no real phones.
 
-- [开发与部署](docs/development.md)：真实设备、Docker Compose、HTTPS、升级和备份恢复。对外部署前请配置 OIDC 和 HTTPS；开发令牌只用于本机。
-- [架构](docs/architecture.md)：组件如何配合，以及执行、安全和恢复机制。
-- `make check`：运行代码检查、测试和构建。
+## Feedback
 
-反馈时请说明复现步骤、软件版本和设备平台，并附脱敏后的错误信息。不要上传密钥、真实设备编号、账号、凭据文件或含个人内容的截图。安全问题请优先通过 GitHub 私密漏洞报告联系维护者（若已启用）。
+Issues and pull requests are welcome. Include reproduction steps, versions and the phone platform — and leave out keys, real device identifiers, accounts and screenshots with personal content. For security issues, please use GitHub's private vulnerability reporting.
 
-## 许可证
+## License
 
-WitX 原创代码与随附文档采用 [Apache License 2.0](LICENSE)，版权信息见 [NOTICE](NOTICE)。软件按“现状”提供，具体保证与责任条款以 LICENSE 为准。第三方依赖保留各自许可；Web 分发附带 [第三方声明](apps/web/public/THIRD_PARTY_NOTICES.txt)。本许可不授予 WitX 名称、标识或其他商标的使用权，法律允许及许可条款规定的情形除外。
-
-除另有明确约定外，主动提交并拟合入本项目的贡献同样按 Apache-2.0 提供。提交者应有权提供相应代码与素材。
+Original WitX code and documentation are licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Third-party dependencies keep their own licenses, and web builds include [third-party notices](apps/web/public/THIRD_PARTY_NOTICES.txt). The license does not grant rights to the WitX name or logo. Contributions intentionally submitted for inclusion are provided under Apache-2.0.

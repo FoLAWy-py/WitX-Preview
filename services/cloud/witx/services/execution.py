@@ -28,11 +28,18 @@ from witx.domain.model import (
     WaitReason,
 )
 from witx.domain.rules import Rejected
+from witx.services import files as file_service
 from witx.store import devices, execution, purchases, runs, tasks
 
-CALL_WAITS = (WaitReason.OBSERVATION, WaitReason.ACTION, WaitReason.APPROVAL, WaitReason.CHILDREN)
+CALL_WAITS = (
+    WaitReason.OBSERVATION,
+    WaitReason.ACTION,
+    WaitReason.APPROVAL,
+    WaitReason.CHILDREN,
+    WaitReason.UNKNOWN,
+)
 
-# What the agent is told when find_app finds nothing: the run goes on, and the
+# What the agent is told when launch_app finds no app by its query: the run goes on, and the
 # phone's own search is the next place to look. Tapping a result is an ordinary input,
 # judged by the policy like any other.
 NOT_FOUND = (
@@ -169,7 +176,7 @@ async def admit(
     (recipient and text; payee, amount and currency), which the risk check compares with
     the screenshot and the approval is bound to. In a task with several phones, an
     order or payment must be on the phone and terms the person chose
-    (``rules.check_purchase``, D33). An input that would wait goes ahead
+    (``rules.check_purchase``). An input that would wait goes ahead
     when a grant of the task covers it (``rules.grant_covers``): the grant approves it,
     and the approval is bound and used like a person's. Raises Rejected when the
     proposal breaks a rule; nothing is stored in that case.
@@ -180,6 +187,10 @@ async def admit(
     lease = await devices.lease(conn, device_id)
     if lease is None or lease.task_id != task.id or lease.run_id != run.id or lease.stop_id:
         raise Rejected("no_device_lease", "this run does not control the device")
+    if payload["kind"] == "receive_file":  # the link is made here, never by the model
+        payload = await file_service.delivery(
+            conn, task.id, task.tenant_id, payload, now=now, public_url=limits.public_url
+        )
     observation = await execution.get_observation(conn, observation_id) if observation_id else None
     latest = await execution.latest_complete(conn, device_id)
     state = await execution.device_state(conn, device_id)
@@ -235,7 +246,7 @@ async def admit(
         searches = [
             a.found_apps
             for a in reversed(actions)
-            if a.kind in ("find_app", "launch_app") and a.device_id == device_id and a.found_apps
+            if a.kind == "launch_app" and a.device_id == device_id and a.found_apps
         ]
         # By query it opens the best match, rank 0: it goes ahead, as the best match does.
         rank = rules.found_rank(payload["app_id"], searches) if payload["app_id"] else 0
@@ -477,10 +488,8 @@ async def record_result(
     locked = await execution.get_action(conn, action.id, lock=True)
     if locked is None or locked.status != ActionStatus.SENT:
         return
-    effect = rules.result_effect(outcome, locked.kind)
+    effect = rules.result_effect(outcome)
     found: dict[str, Any] = {}
-    if outcome == "returned" and locked.kind == "find_app":
-        found["found_apps"] = apps or []
     if outcome == "returned" and locked.kind == "launch_app" and apps:  # opened by query
         found["found_apps"] = apps
     if outcome == "returned" and locked.kind in ("type_text", "select_option") and field_text:
@@ -521,15 +530,25 @@ async def resolve_action_call(conn: AsyncConnection, action_id: UUID) -> None:
             ObservationStatus.FAILED,
         ):
             return  # wait for the follow-up screenshot
+        if action.effect == Effect.UNKNOWN:
+            # The person rules on it from a newer screenshot (reconcile), and that ruling
+            # is this input's result: the agent neither asks nor goes on meanwhile.
+            # Woken, the run waits again with this call open, now for the ruling.
+            await runs.wake(conn, call.run_id, (WaitReason.ACTION,))
+            return
         output.update(
             effect=action.effect.value,
             note={
                 Effect.NOT_ATTEMPTED: "The input was not sent to the device.",
                 Effect.UNVERIFIED: "Input was sent. Check the new screenshot for its effect.",
-                Effect.UNKNOWN: "Input may or may not have reached the device. No further "
-                "input is possible on it until a user reconciles this action.",
             }.get(action.effect, ""),
         )
+        if action.reconciled_by is not None:
+            happened = "it happened" if action.effect == Effect.SUCCESS else "it did not happen"
+            output["note"] = (
+                "Whether this input reached the phone was unknown; the user checked a newer "
+                f"screenshot and says {happened}. Look at the new screenshot before you go on."
+            )
         if post.status == ObservationStatus.COMPLETE:
             output["observation"] = observation_output(post)
         typed = str(action.input.get("text", ""))
@@ -581,16 +600,19 @@ async def resolve_action_call(conn: AsyncConnection, action_id: UUID) -> None:
                 "the app the user meant, open the right one with launch_app by its app_id; "
                 "in ask mode the user confirms it."
             )
-        elif action.found_apps is not None:
-            output["apps"] = action.found_apps
-            output["note"] = (
-                "These installed apps match, best first. Open the one the user meant with "
-                "launch_app, whichever place it has; in ask mode the user confirms it."
-                if action.found_apps
-                else NOT_FOUND
-            )
     if action.reason == "app_not_found":  # launch_app by query: nothing was opened
         output["note"] = NOT_FOUND
+    if action.kind == "receive_file" and action.effect == Effect.UNVERIFIED:
+        output["note"] = (
+            "The WitX app is open and downloading the file. It is ready when the app lists "
+            "it under Files with a share button; until then the app shows it downloading "
+            "(observe again). To send it on, tap its share button and choose the app."
+        )
+    if action.reason == "witx_app_missing":
+        output["note"] = (
+            "The WitX app is not installed on this phone, so no file can be put there. "
+            "Tell the user; do not look for another way to download it."
+        )
     if action.reason == "wrong_field":
         output["focused_field"] = action.field_info or {}
         output["note"] = (
@@ -762,6 +784,7 @@ async def reconcile(
     )
     updated = await execution.get_action(conn, action_id)
     assert updated is not None
+    await resolve_action_call(conn, action_id)  # the ruling is the input's result
     return updated
 
 

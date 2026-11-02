@@ -43,6 +43,18 @@ location ~ ^/(api|gateway)/ {
     proxy_send_timeout 1h;
 }
 
+# A file a person gives a task may be up to 100 MiB: only this path takes one
+# that large, and it goes on to the API as it arrives.
+location = /api/v1/files {
+    client_max_body_size 101m;
+    proxy_request_buffering off;
+    proxy_pass http://api:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
 # The Web app: hashed assets are immutable; every other path is the app's own route.
 location /assets/ {
     set $cache_control "public, max-age=31536000, immutable";

@@ -3,6 +3,7 @@ import { Download, RefreshCw, Store, Trash2 } from "lucide-react";
 import type { InstalledPluginView, PluginOfferView } from "@/api/types.gen";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth";
+import { matchesQuery } from "@/lib/search";
 import { lineDiff } from "@/lib/diff";
 import { cn } from "@/lib/format";
 import { useAsync } from "@/lib/useAsync";
@@ -10,13 +11,20 @@ import { Button, Card, Ico, Mono } from "@/components/ui/base";
 import { Dialog } from "@/components/ui/dialog";
 
 /**
- * Plugins from marketplaces: the installed ones with the skills each brings
- *, and what a marketplace offers once the person looks (that fetches it). An owner
+ * Plugins from marketplaces: the installed ones with the skills each brings,
+ * and what a marketplace offers once the person looks (that fetches it). An owner
  * installs, updates or removes one; nothing is installed before they have read its
  * text, or what changes, and the server installs only what they read (its commit and
  * digest).
  */
-export function Plugins({ onSkill }: { onSkill: (name: string) => void }) {
+export function Plugins({
+  query,
+  onSkill,
+}: {
+  /** What the page's search box holds: only plugins that match are listed. */
+  query: string;
+  onSkill: (name: string) => void;
+}) {
   const { t } = useI18n();
   const { api, me } = useAuth();
   const owner = me?.role === "owner";
@@ -29,6 +37,15 @@ export function Plugins({ onSkill }: { onSkill: (name: string) => void }) {
   }>();
   const [removing, setRemoving] = useState<InstalledPluginView>();
   const installed = state.data?.installed ?? [];
+  const skillsOf = (plugin: string) =>
+    (skills.data?.skills ?? []).filter((s) => s.plugin === plugin);
+  const shown = installed.filter((p) =>
+    matchesQuery(query, [
+      p.name,
+      p.marketplace,
+      ...skillsOf(p.name).flatMap((s) => [s.name, s.description]),
+    ]),
+  );
   const marketplaces = state.data?.marketplaces ?? [];
   const changed = () => {
     void state.reload();
@@ -53,11 +70,14 @@ export function Plugins({ onSkill }: { onSkill: (name: string) => void }) {
             {t("plugins.noneInstalled")}
           </Card>
         )}
+        {installed.length > 0 && shown.length === 0 && (
+          <Card className="p-4 text-[13px] text-faint">
+            {t("plugins.noMatch")}
+          </Card>
+        )}
         <ul className="space-y-2">
-          {installed.map((p) => {
-            const its = (skills.data?.skills ?? []).filter(
-              (s) => s.plugin === p.name,
-            );
+          {shown.map((p) => {
+            const its = skillsOf(p.name);
             const trouble = skills.data?.not_loaded.find(
               (n) => n.plugin === p.name,
             );
@@ -128,6 +148,7 @@ export function Plugins({ onSkill }: { onSkill: (name: string) => void }) {
               name={m.name}
               source={m.source}
               installed={installed}
+              query={query}
               owner={owner}
               open={browsing === m.name}
               onOpen={() =>
@@ -173,6 +194,7 @@ function Marketplace({
   name,
   source,
   installed,
+  query,
   owner,
   open,
   onOpen,
@@ -181,6 +203,7 @@ function Marketplace({
   name: string;
   source: string;
   installed: InstalledPluginView[];
+  query: string;
   owner: boolean;
   open: boolean;
   onOpen: () => void;
@@ -203,7 +226,12 @@ function Marketplace({
         )}
       </div>
       {open && (
-        <Offers marketplace={name} installed={installed} onRead={onRead} />
+        <Offers
+          marketplace={name}
+          installed={installed}
+          query={query}
+          onRead={onRead}
+        />
       )}
     </Card>
   );
@@ -212,10 +240,12 @@ function Marketplace({
 function Offers({
   marketplace,
   installed,
+  query,
   onRead,
 }: {
   marketplace: string;
   installed: InstalledPluginView[];
+  query: string;
   onRead: (offer: PluginOfferView) => void;
 }) {
   const { t } = useI18n();
@@ -233,9 +263,16 @@ function Offers({
     );
   if (offers.data.length === 0)
     return <p className="mt-2 text-[13px] text-faint">{t("plugins.none")}</p>;
+  const shown = offers.data.filter((o) =>
+    matchesQuery(query, [o.name, o.description, ...o.skills]),
+  );
+  if (shown.length === 0)
+    return (
+      <p className="mt-2 text-[13px] text-faint">{t("plugins.noMatch")}</p>
+    );
   return (
     <ul className="mt-2 divide-y divide-line">
-      {offers.data.map((offer) => {
+      {shown.map((offer) => {
         const mine = installed.find((p) => p.name === offer.name);
         const current =
           mine?.marketplace === marketplace && mine.commit === offer.commit;

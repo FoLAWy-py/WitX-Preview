@@ -46,7 +46,7 @@ async def provision(admin_db: Database, name: str, *, devices: int = 0) -> Tenan
             gateway_id=gateway_id,
             devices=[device_info(i) for i in range(count)],
         )
-        for device in registered:  # the owner enabled them (device pool, #33)
+        for device in registered:  # the owner enabled them (device pool)
             await device_store.set_enabled(
                 conn, device.id, user_id=user_id, enabled=True, name=device.name
             )
@@ -58,7 +58,7 @@ def device_info(i: int) -> dict[str, Any]:
         "native_id": f"emulator-{5554 + 2 * i}",
         "platform": "android",
         "name": f"Pixel {i}",
-        "capabilities": ["tap", "swipe", "back", "home", "launch_app", "find_app"],
+        "capabilities": ["tap", "swipe", "back", "home", "launch_app"],
     }
 
 

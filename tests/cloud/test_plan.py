@@ -53,7 +53,6 @@ def looking(**kw: object) -> None:
 def test_in_plan_mode_an_input_that_changes_nothing_is_not_refused() -> None:
     looking()
     looking(kind="launch_app", risk=None)  # not an assessed kind: no verdict to wait for
-    looking(kind="find_app", risk=None)
     looking(kind="type_text")  # a search word
 
 

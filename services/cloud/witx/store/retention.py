@@ -117,10 +117,11 @@ async def purge_task_rows(conn: AsyncConnection, task_id: UUID, now: datetime) -
         "DELETE FROM approvals WHERE action_id IN (SELECT id FROM actions WHERE task_id = :t)",
         "DELETE FROM grants WHERE task_id = :t",
         # Kept memories stay the person's, also what an agent kept on its own;
-        # proposals from before D59, never kept, go with the task.
+        # proposals from before auto memory, never kept, go with the task.
         "DELETE FROM user_memories WHERE source_task_id = :t AND status <> 'kept'",
         "UPDATE user_memories SET source_task_id = NULL WHERE source_task_id = :t",
         "DELETE FROM actions WHERE task_id = :t",
+        "DELETE FROM files WHERE task_id = :t",
         "DELETE FROM purchase_intents WHERE task_id = :t",
         f"DELETE FROM tool_calls WHERE run_id IN {task_runs}",
         f"DELETE FROM steps WHERE run_id IN {task_runs}",

@@ -1,5 +1,5 @@
-"""The independent checks of a turn, outside any transaction: the risk of its input and, under a
-goal, whether the goal holds at its end."""
+"""The independent checks of a turn, outside any transaction: the risk of its input
+and, under a goal, whether the goal holds at its end."""
 
 import json
 from datetime import UTC, datetime

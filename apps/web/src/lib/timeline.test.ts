@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActionView, TaskDetail } from "@/api/types.gen";
 import {
+  timeBreaks,
   blocks,
   buildTimeline,
   latestScreens,
@@ -318,7 +319,7 @@ describe("timeline", () => {
   });
 
   it("orders by the moment, not by how the time is written", () => {
-    // The first message came in the server's zone, the result in UTC (#140 follow-up).
+    // The first message came in the server's zone, the result in UTC.
     const items = buildTimeline(
       {
         ...task,
@@ -667,5 +668,22 @@ describe("a long task's loaded part", () => {
       "2026-10-10T10:00:00.5Z",
     ]);
     expect(inPart(items, undefined)).toEqual(items);
+  });
+});
+
+describe("timeBreaks", () => {
+  const at = (d: number, h: number, m: number) =>
+    new Date(2026, 9, d, h, m).toISOString();
+  it("says the time first, after a pause of half an hour, and on a new day", () => {
+    expect(
+      timeBreaks([
+        at(16, 10, 0),
+        at(16, 10, 29),
+        at(16, 10, 58),
+        at(16, 11, 28),
+        at(16, 23, 59),
+        at(17, 0, 1),
+      ]),
+    ).toEqual([true, false, false, true, true, true]);
   });
 });

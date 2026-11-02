@@ -27,3 +27,15 @@ def test_an_app_named_by_a_word_of_the_query_comes_before_one_that_only_contains
         "com.apple.mobilenotes",
         "Notes",
     )
+
+
+def test_on_android_an_app_is_named_by_the_last_part_of_its_id() -> None:
+    installed = {
+        "com.android.contactspicker": None,
+        "com.google.android.contacts": None,
+        "com.android.providers.contacts": None,
+    }
+    assert apps.match("Contacts Google Contacts", installed)[0] == (
+        "com.google.android.contacts",
+        None,
+    )

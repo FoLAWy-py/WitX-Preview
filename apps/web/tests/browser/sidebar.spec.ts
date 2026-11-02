@@ -222,3 +222,46 @@ test("a pinned task moves to Pinned, above the groups, and back when unpinned", 
   await expect(nav.getByText("Pinned", { exact: true })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Check battery" })).toHaveCount(1);
 });
+
+test("the count of tasks that need you leads to them: the one task, or a list of them", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  await signIn(page);
+  const sidebar = page.getByRole("complementary").first();
+
+  await sidebar.getByRole("link", { name: "1 need you" }).click();
+  await expect(page).toHaveURL(/\/tasks\/t1$/);
+
+  const waiting = (id: string, title: string) => ({
+    id,
+    request: title,
+    goal: "",
+    title,
+    status: "active",
+    permission_mode: "auto",
+    needs_attention: true,
+    group_id: null,
+    pinned: false,
+    created_at: task.created_at,
+    updated_at: task.updated_at,
+  });
+  await page.route(
+    (url) =>
+      url.pathname === "/api/v1/tasks" &&
+      url.searchParams.get("attention") === "true",
+    (route) =>
+      route.fulfill({
+        json: [waiting("t1", "Pay the bill"), waiting("t2", "Book a table")],
+      }),
+  );
+  await page.goto("/");
+  await sidebar.getByRole("button", { name: "2 need you" }).click();
+  const list = page.getByRole("menu", { name: "Tasks that need you" });
+  await expect(list.getByRole("menuitem")).toHaveText([
+    "Pay the bill",
+    "Book a table",
+  ]);
+  await list.getByRole("menuitem", { name: "Book a table" }).click();
+  await expect(page).toHaveURL(/\/tasks\/t2$/);
+});

@@ -567,8 +567,8 @@ export function screenshotAfter(
   return after[0]?.id;
 }
 
-/** What the agent itself did along the way, besides its steps: lines of its round
- *. Everything else that changes the task (a model, a goal, plan mode, a takeover,
+/** What the agent itself did along the way, besides its steps: lines of its round.
+ * Everything else that changes the task (a model, a goal, plan mode, a takeover,
  * phones) stays a divider of the conversation. */
 const WORK_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
   "timeline.sys.webSearchOn",
@@ -604,4 +604,27 @@ export function blocks(items: TimelineItem[]): Block[] {
     else out.push({ kind: "item", item });
   }
   return out;
+}
+
+/** How long a pause makes the conversation say the time again. */
+export const TIME_GAP_MS = 30 * 60 * 1000;
+
+/** When a block of the conversation happened: its first item's time. */
+export const blockTime = (block: Block): string =>
+  block.kind === "round" ? block.items[0].at : block.item.at;
+
+/**
+ * Before which blocks the conversation says the time: the first, and any that
+ * comes 30 minutes or more after the one before it, or on another day.
+ */
+export function timeBreaks(times: string[]): boolean[] {
+  return times.map((at, i) => {
+    if (i === 0) return true;
+    const before = new Date(times[i - 1]);
+    const now = new Date(at);
+    return (
+      now.getTime() - before.getTime() >= TIME_GAP_MS ||
+      now.toDateString() !== before.toDateString()
+    );
+  });
 }

@@ -13,6 +13,7 @@ import {
   PowerOff,
   ShieldX,
   Smartphone,
+  Trash2,
 } from "lucide-react";
 import type {
   DeviceChange,
@@ -26,7 +27,7 @@ import { useI18n, type MessageKey } from "@/i18n";
 import { useAuth } from "@/lib/auth";
 import { cn, exactDate, relativeTime } from "@/lib/format";
 import { useAsync } from "@/lib/useAsync";
-import { byPool, takeoverable } from "@/lib/pool";
+import { byPool, gone, goneLast, takeoverable } from "@/lib/pool";
 import { useWorkspace } from "@/lib/workspace";
 import { PageBar } from "@/components/Shell";
 import { loadTakeover, Takeover } from "@/components/takeover/lazy";
@@ -45,7 +46,7 @@ import {
   type Tone,
 } from "@/components/ui/base";
 import { Dialog } from "@/components/ui/dialog";
-import { InfoTip, Menu } from "@/components/ui/popover";
+import { InfoTip, Menu, type MenuEntry } from "@/components/ui/popover";
 
 type Status =
   | "ready"
@@ -56,7 +57,7 @@ type Status =
   | "attention";
 
 function statusOf(d: DeviceView): Status {
-  if (!d.online || d.problems.includes("disconnected")) return "disconnected";
+  if (gone(d)) return "disconnected";
   if (d.problems.length) return "attention";
   if (!d.enabled) return "not_enabled";
   if (d.taken_over) return "taken_over";
@@ -226,28 +227,73 @@ function DeviceMenu({ device }: { device: DeviceView }) {
   const { api, me } = useAuth();
   const { devices } = useWorkspace();
   const [error, setError] = useState<string>();
-  if (me?.role !== "owner" || !device.enabled) return null;
+  const [removing, setRemoving] = useState(false);
+  const canDisable = device.enabled && !gone(device);
+  // Gone and held by nothing; the server also checks for an unknown input.
+  const canRemove = gone(device) && !device.task_id && !device.taken_over;
+  if (me?.role !== "owner" || !(canDisable || canRemove)) return null;
   const label = t("devices.menuFor", { name: device.name });
+  const entries: MenuEntry[] = [];
+  if (canDisable)
+    entries.push({
+      id: "disable",
+      label: t("devices.disable"),
+      icon: PowerOff,
+      danger: true,
+      onSelect: () => {
+        setError(undefined);
+        api
+          .disableDevice(device.id)
+          .then(() => devices.reload())
+          .catch((err: Error) => setError(err.message));
+      },
+    });
+  if (canRemove)
+    entries.push({
+      id: "remove",
+      label: t("devices.remove"),
+      icon: Trash2,
+      danger: true,
+      onSelect: () => {
+        setError(undefined);
+        setRemoving(true);
+      },
+    });
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">
+      {removing && (
+        <Dialog
+          open
+          title={t("devices.removeTitle", { name: device.name })}
+          onClose={() => setRemoving(false)}
+          footer={
+            <>
+              <Button onClick={() => setRemoving(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                variant="danger"
+                icon={Trash2}
+                onClick={() => {
+                  setRemoving(false);
+                  api
+                    .removeDevice(device.id)
+                    .then(() => devices.reload())
+                    .catch((err: Error) => setError(err.message));
+                }}
+              >
+                {t("devices.remove")}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-[14px] text-muted">{t("devices.removeBody")}</p>
+        </Dialog>
+      )}
       <Menu
         label={label}
         minWidth={180}
-        entries={[
-          {
-            id: "disable",
-            label: t("devices.disable"),
-            icon: PowerOff,
-            danger: true,
-            onSelect: () => {
-              setError(undefined);
-              api
-                .disableDevice(device.id)
-                .then(() => devices.reload())
-                .catch((err: Error) => setError(err.message));
-            },
-          },
-        ]}
+        entries={entries}
         trigger={({ ref, open, toggle, onKeyDown }) => (
           <Button
             ref={ref}
@@ -279,8 +325,43 @@ function DeviceCard({
   device: DeviceView;
   highlight: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const status = statusOf(device);
+  // Gone: the name, when it was last seen, and the menu to remove it; nothing to
+  // fix or enable until its Gateway has it again.
+  if (status === "disconnected")
+    return (
+      <Card
+        className={cn(
+          "flex min-w-0 items-center gap-3 border-dashed bg-transparent p-3",
+          highlight && "ring-2 ring-accent/40",
+        )}
+      >
+        <span
+          id={device.id}
+          aria-hidden
+          className="flex h-8 w-8 shrink-0 scroll-mt-20 items-center justify-center rounded-lg bg-sunken text-faint"
+        >
+          <PlatformIcon platform={device.platform} size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-[14px] font-medium text-muted">
+              {device.name}
+            </h3>
+            <Chip tone={statusTone[status]}>
+              {t("devices.status.disconnected")}
+            </Chip>
+          </div>
+          <p className="mt-0.5 truncate text-[12.5px] text-faint">
+            {t(device.platform === "android" ? "common.android" : "common.ios")}
+            {device.last_seen_at &&
+              ` · ${t("devices.lastSeen", { when: relativeTime(device.last_seen_at, locale) })}`}
+          </p>
+        </div>
+        <DeviceMenu device={device} />
+      </Card>
+    );
   return (
     <Card
       className={cn(
@@ -764,7 +845,7 @@ export default function Devices() {
                 </span>
               </h2>
               <div className="grid gap-3 md:grid-cols-2">
-                {members.map((d) => (
+                {goneLast(members).map((d) => (
                   <DeviceCard
                     key={d.id}
                     device={d}

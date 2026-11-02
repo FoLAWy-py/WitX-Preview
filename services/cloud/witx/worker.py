@@ -16,7 +16,7 @@ from witx.harness import relay
 from witx.harness.loop import Harness
 from witx.models import ModelClient
 from witx.objects import ObjectStore
-from witx.services import retention, schedules, side_chat, titles
+from witx.services import pool, retention, schedules, side_chat, titles
 from witx.store import runs
 from witx.store.db import Database
 
@@ -117,9 +117,15 @@ async def maintain_forever(
     audit_retention: timedelta,
     every_seconds: float = 60,
 ) -> None:
-    """Purges deleted tasks and expired data once a minute. Several workers may do this
-    at once: each piece of work is locked by whoever takes it first."""
+    """Purges deleted tasks and expired data once a minute, and takes offline the devices
+    of Gateways no API process has heard from. Several workers may do this at
+    once: each piece of work is locked by whoever takes it first."""
     while not stop.is_set():
+        try:
+            if gone := await pool.take_silent_offline(db, datetime.now(UTC)):
+                log.info("%d devices of silent Gateways went offline", gone)
+        except Exception:
+            log.exception("silent Gateway pass failed; retrying later")
         try:
             done = await retention.purge(
                 db,
@@ -128,12 +134,14 @@ async def maintain_forever(
                 screenshot_retention=screenshot_retention,
                 audit_retention=audit_retention,
             )
-            if done.tasks or done.screenshots or done.tombstones:
+            if done.tasks or done.screenshots or done.tombstones or done.files:
                 log.info(
-                    "purged %d deleted tasks, %d expired screenshots, %d tombstones",
+                    "purged %d deleted tasks, %d expired screenshots, %d tombstones, "
+                    "%d files never sent",
                     done.tasks,
                     done.screenshots,
                     done.tombstones,
+                    done.files,
                 )
         except Exception:
             log.exception("retention pass failed; retrying later")

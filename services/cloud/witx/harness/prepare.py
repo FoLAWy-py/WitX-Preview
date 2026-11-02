@@ -26,11 +26,11 @@ from witx.domain.model import (
     ToolCall,
     WaitReason,
 )
-from witx.harness import context, relay, tools
+from witx.harness import context, relay
 from witx.harness.turn import Prepared, utcnow
 from witx.services import execution as exec_service
 from witx.services import lifecycle
-from witx.store import devices, execution, identity, runs, tasks
+from witx.store import devices, execution, files, identity, runs, tasks
 from witx.store import memories as memory_store
 
 if TYPE_CHECKING:
@@ -143,6 +143,9 @@ async def prepare(harness: "Harness", run_id: UUID, tenant_id: UUID, epoch: int)
         inputs = [
             dict(r) for r in await tasks.inputs(conn, task.id, share=run.parent_run_id is None)
         ]
+        phones = [d for d in await devices.list_all(conn) if d.id in run.device_ids]
+        given = await files.of_task(conn, task.id)
+        offered = harness.tools_for(task, run, phones, files=bool(given))
         ctx = context.RunContext(
             task=task,
             run=run,
@@ -153,8 +156,9 @@ async def prepare(harness: "Harness", run_id: UUID, tenant_id: UUID, epoch: int)
             if not steps and run.parent_run_id is None
             else (),
             app_memories=memory_store.by_app(kept),
-            devices=[d for d in await devices.list_all(conn) if d.id in run.device_ids],
+            devices=phones,
             inputs=inputs,
+            files=given,
             agents=await relay.agent_names(conn, run) if run.parent_run_id is None else {},
             questions=(
                 [dict(q) for q in await tasks.questions(conn, task.id)]
@@ -186,9 +190,9 @@ async def prepare(harness: "Harness", run_id: UUID, tenant_id: UUID, epoch: int)
             input_seq=input_seq,
             request={
                 "model": task.model,
-                "tools": [t["name"] for t in tools.TOOLS],
+                "tools": [t["name"] for t in offered],
                 "history_steps": len(steps),
-                # The plugins whose skills this step could load (spec §8.3, D85).
+                # The plugins whose skills this step could load.
                 "plugins": {
                     s.plugin: {"version": s.version, "sha256": s.digest}
                     for s in harness.skills().values()
@@ -221,6 +225,7 @@ async def prepare(harness: "Harness", run_id: UUID, tenant_id: UUID, epoch: int)
             step_id,
             context.history(steps, summary, unknown) + new,
             None if chosen is None else tuple(chosen),
+            offered,
             steps=list(steps),
             new=new,
             summary=summary,
@@ -404,12 +409,20 @@ async def wait_reason(conn: AsyncConnection, open_calls: list[ToolCall]) -> Wait
         if call.action_id is not None:
             action = await execution.get_action(conn, call.action_id)
             awaiting = action is not None and action.status == ActionStatus.AWAITING_APPROVAL
-            reasons.add(WaitReason.APPROVAL if awaiting else WaitReason.ACTION)
+            unknown = action is not None and action.effect == Effect.UNKNOWN
+            reasons.add(
+                WaitReason.APPROVAL
+                if awaiting
+                else WaitReason.UNKNOWN
+                if unknown
+                else WaitReason.ACTION
+            )
         elif call.child_run_id is not None:
             reasons.add(WaitReason.CHILDREN)
         else:
             reasons.add(WaitReason.OBSERVATION)
     for reason in (
+        WaitReason.UNKNOWN,
         WaitReason.APPROVAL,
         WaitReason.ACTION,
         WaitReason.OBSERVATION,

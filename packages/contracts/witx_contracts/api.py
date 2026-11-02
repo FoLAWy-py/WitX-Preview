@@ -11,6 +11,7 @@ from witx_contracts.common import ActionKind, Capability, Platform, Problem, Rot
 TaskStatus = Literal["active", "pausing", "paused", "stopping", "stopped", "completed", "failed"]
 RunStatus = Literal["runnable", "running", "waiting", "completed", "failed", "cancelled"]
 # "agent": a sub-agent waits for the main agent's answer to its question.
+# "unknown": an input's effect is unknown; the run waits for the user's ruling.
 WaitReason = Literal[
     "observation",
     "action",
@@ -21,6 +22,7 @@ WaitReason = Literal[
     "model_retry",
     "paused",
     "agent",
+    "unknown",
 ]
 ActionStatus = Literal[
     "awaiting_approval", "queued", "sent", "done", "rejected", "denied", "cancelled"
@@ -65,6 +67,8 @@ class TaskSpec(Wire):
 
 class TaskCreate(TaskSpec):
     group_id: UUID | None = None  # filed in this group from the start (a schedule's are not)
+    # Files uploaded with POST /api/v1/files that come with the first message.
+    file_ids: list[UUID] = Field(default_factory=list, max_length=10)
 
 
 Repeat = Literal["once", "daily", "weekdays", "weekly", "monthly"]
@@ -131,11 +135,13 @@ class TaskInputCreate(Wire):
     text: str = Field(min_length=1, max_length=4000)
     run_id: UUID | None = None
     resume: bool = False
+    # Files uploaded with POST /api/v1/files that come with it; to the main agent.
+    file_ids: list[UUID] = Field(default_factory=list, max_length=10)
 
 
 class ApprovalDecision(Wire):
     decision: Literal["approve", "deny"]
-    # Approve later inputs of the same kind too (a grant, spec §10.4). Not for payments
+    # Approve later inputs of the same kind too (a grant). Not for payments
     # or orders, which are always approved one by one.
     similar: bool = False
 
@@ -187,6 +193,7 @@ class DeviceView(Wire):
     problems: list[Problem]  # empty: nothing missing on the Gateway's side
     enabled: bool  # an owner enabled it; until then it takes no task
     taken_over: bool = False  # a person controls it right now (in a task or from the pool)
+    last_seen_at: datetime | None = None  # its Gateway last listed it
 
 
 GatewayState = Literal["waiting", "enrolled", "disabled", "revoked"]
@@ -223,7 +230,7 @@ class DeviceEnable(Wire):
 
 
 class DeviceChange(Wire):
-    change: Literal["enabled", "disabled", "taken_over"]
+    change: Literal["enabled", "disabled", "taken_over", "removed"]
     name: str
     by: str
     at: datetime
@@ -443,7 +450,7 @@ class MemorySettings(Wire):
 
 
 class MemoryView(Wire):
-    """Something kept for a person's future tasks (§8.2): written by them, or by an
+    """Something kept for a person's future tasks: written by them, or by an
     agent on its own in the task ``source_task_id``."""
 
     id: UUID
@@ -531,8 +538,8 @@ class PluginFileView(Wire):
 
 
 class PluginOfferView(Wire):
-    """A plugin a marketplace lists now, to read before installing or updating it
-    : installing it is bound to this commit and digest."""
+    """A plugin a marketplace lists now, to read before installing or updating it:
+    installing it is bound to this commit and digest."""
 
     name: str
     version: str  # "" when it could not be read
@@ -557,7 +564,7 @@ class PlanStepView(Wire):
 
 
 class NoteView(Wire):
-    """Something the agent wrote down from a screenshot (D6, #74): true when it was seen."""
+    """Something the agent wrote down from a screenshot: true when it was seen."""
 
     text: str
     run_id: UUID  # the run that wrote it
@@ -578,6 +585,18 @@ class EarlierView(Wire):
     """The part of a task its page has not loaded: everything before ``before``."""
 
     before: datetime
+
+
+class FileView(Wire):
+    """A file the person gave a task. ``input_seq``: the message it came with;
+    none with the first message, or not attached to a task yet."""
+
+    id: UUID
+    name: str
+    size: int
+    content_type: str
+    input_seq: int | None = None
+    created_at: datetime
 
 
 class TaskDetail(Wire):
@@ -601,6 +620,7 @@ class TaskDetail(Wire):
     usage: UsageView
     result: TaskResult | None
     inputs: list[TaskInputView]
+    files: list[FileView] = Field(default_factory=list)  # in the order they were given
     runs: list[RunView]
     actions: list[ActionView]
     grants: list[GrantView]

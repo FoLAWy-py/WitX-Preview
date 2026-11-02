@@ -205,7 +205,7 @@ function Retention() {
 }
 
 /**
- * What the agent remembers for the signed-in person (§8.2): their own entries, which
+ * What the agent remembers for the signed-in person: their own entries, which
  * every task they start sees. Only theirs; nobody else's tasks see them.
  */
 /** Skills and plugins have a page of their own; a search here still finds it. */
@@ -346,7 +346,7 @@ function Memories() {
 }
 
 /**
- * Which model providers may receive this workspace's screenshots and text .
+ * Which model providers may receive this workspace's screenshots and text.
  * Until an owner chooses, only the default model's provider. At least one stays on.
  */
 function Providers() {
@@ -444,7 +444,7 @@ interface Entry {
   node: ReactNode;
 }
 
-/** Tenant-wide settings (who may use full access, the fast risk check D29, which model
+/** Tenant-wide settings (who may use full access, the fast risk check, which model
  * providers may receive the workspace's data, switching models), the person's own
  * memories and the way to the skills, in sections: a list of them beside the
  * page on wide screens, and a search over every setting's name and description. */

@@ -1,4 +1,4 @@
-"""Request logs, correlated logs from the worker, and /metrics ."""
+"""Request logs, correlated logs from the worker, and /metrics."""
 
 import asyncio
 from collections.abc import AsyncIterator, Callable

@@ -355,10 +355,9 @@ def test_an_approved_input_whose_parameters_changed_afterwards_is_not_delivered(
 
 
 def test_gateway_outcomes_map_to_effects() -> None:
-    assert rules.result_effect("rejected", "tap") == Effect.NOT_ATTEMPTED
-    assert rules.result_effect("returned", "tap") == Effect.UNVERIFIED
-    assert rules.result_effect("unknown", "tap") == Effect.UNKNOWN
-    assert rules.result_effect("returned", "find_app") == Effect.NO_EFFECT  # it only reads
+    assert rules.result_effect("rejected") == Effect.NOT_ATTEMPTED
+    assert rules.result_effect("returned") == Effect.UNVERIFIED
+    assert rules.result_effect("unknown") == Effect.UNKNOWN
 
 
 def test_reconcile_needs_a_later_screenshot_of_the_same_device() -> None:
@@ -701,3 +700,175 @@ def test_a_reply_in_english_to_a_chinese_request_is_in_another_language() -> Non
     assert rules.wrong_language(asked, "This phone is running iOS 27.0, per Settings.")
     # Chinese naming the English the screen shows is in the request's language.
     assert not rules.wrong_language(asked, "在 Settings > General > About 里显示 iOS 27.0。")
+
+
+def test_a_translation_the_user_asked_for_may_be_in_another_language() -> None:
+    asked = "Translate 'see you tomorrow' into Chinese for me."
+    reply = "Here it is:\n\n> 明天见，晚安。我们到时候再联系。\n\nSay it as a friendly goodbye."
+    assert not rules.wrong_language(asked, reply)
+    assert not rules.wrong_language(
+        asked, "Here it is:\n\n```\n明天见，晚安。我们到时候再联系。\n```"
+    )
+
+
+TOOLS = [
+    "tap",
+    "press_back",
+    "set_picker",
+    "launch_app",
+    "use_web_search",
+    "propose_purchase",
+    "present_plan",
+    "draft_skill",
+    "delegate",
+    "message_agent",
+    "stop_agent",
+    "complete_task",
+    "send_file",
+]
+INPUTS = {
+    "tap": "tap",
+    "press_back": "back",
+    "set_picker": "set_picker",
+    "launch_app": "launch_app",
+    "send_file": "receive_file",
+}
+IPHONE = ["tap", "set_picker", "home", "launch_app", "receive_file"]
+ANDROID = ["tap", "back", "home", "launch_app"]
+
+
+def offered(**facts: object) -> set[str]:
+    given: dict[str, object] = {
+        "capabilities": IPHONE,
+        "phones": 1,
+        "plan_mode": False,
+        "sub_agent": False,
+        "can_delegate": True,
+        "web_search": True,
+    } | facts
+    return rules.offered_tools(TOOLS, INPUTS, **given)  # type: ignore[arg-type]
+
+
+def test_a_run_is_offered_only_the_input_tools_its_phones_take() -> None:
+    assert {"tap", "set_picker", "launch_app"} <= offered() and "press_back" not in offered()
+    android = offered(capabilities=ANDROID)
+    assert "press_back" in android and "set_picker" not in android
+    assert {"press_back", "set_picker"} <= offered(capabilities=IPHONE + ANDROID, phones=2)
+    assert not offered(capabilities=[], phones=0) & set(INPUTS)  # no phone, no input
+
+
+def test_a_purchase_is_proposed_only_in_a_run_with_several_phones() -> None:
+    assert "propose_purchase" not in offered()
+    assert "propose_purchase" in offered(capabilities=IPHONE + ANDROID, phones=2)
+
+
+def test_only_the_main_agent_in_plan_mode_is_offered_present_plan() -> None:
+    assert "present_plan" not in offered()
+    assert "present_plan" in offered(plan_mode=True)
+    assert "present_plan" not in offered(plan_mode=True, sub_agent=True)
+
+
+def test_a_sub_agent_is_not_offered_draft_skill() -> None:
+    assert "draft_skill" in offered() and "draft_skill" not in offered(sub_agent=True)
+
+
+def test_a_run_that_cannot_delegate_is_offered_none_of_the_sub_agent_tools() -> None:
+    agents = {"delegate", "message_agent", "stop_agent"}
+    assert agents <= offered(sub_agent=True)  # a sub-agent below the depth limit can
+    assert not offered(sub_agent=True, can_delegate=False) & agents
+
+
+def test_web_search_is_offered_only_where_the_deployment_allows_it() -> None:
+    assert "use_web_search" in offered() and "use_web_search" not in offered(web_search=False)
+
+
+def test_a_file_is_offered_to_send_only_when_the_task_has_one_and_a_phone_takes_it() -> None:
+    assert "send_file" not in offered()
+    assert "send_file" in offered(files=True)
+    assert "send_file" not in offered(files=True, capabilities=ANDROID)
+
+
+def test_a_tool_that_needs_nothing_is_offered_to_every_run() -> None:
+    assert "complete_task" in offered(capabilities=[], phones=0, sub_agent=True, can_delegate=False)
+
+
+# ---------------------------------------------------------------- files
+
+
+def test_a_download_link_names_its_tenant_and_file_and_works_until_it_expires() -> None:
+    key, tenant, file = b"k" * 32, uuid4(), uuid4()
+    now = datetime(2026, 11, 1, 12, tzinfo=UTC)
+    token = rules.link_token(key, tenant, file, now + rules.LINK_TTL)
+    link = rules.read_link(token)
+    assert link is not None
+    assert (link.tenant_id, link.file_id) == (tenant, file)
+    assert "/" not in token
+    assert rules.link_valid(link, key, now)
+    assert not rules.link_valid(link, key, now + rules.LINK_TTL)
+    assert not rules.link_valid(link, b"x" * 32, now)
+
+
+def test_a_download_link_altered_in_any_part_is_not_valid() -> None:
+    key, now = b"k" * 32, datetime(2026, 11, 1, 12, tzinfo=UTC)
+    token = rules.link_token(key, uuid4(), uuid4(), now + rules.LINK_TTL)
+    claim, mac = token.split(".")
+    other = rules.link_token(key, uuid4(), uuid4(), now + rules.LINK_TTL).split(".")[0]
+    for altered in (f"{other}.{mac}", f"{claim}.{mac[::-1]}"):
+        link = rules.read_link(altered)
+        assert link is None or not rules.link_valid(link, key, now)
+    assert rules.read_link("not-a-token") is None
+    assert rules.read_link("a.b.c") is None
+
+
+def test_a_range_asks_for_part_of_a_file_or_all_of_it() -> None:
+    assert rules.byte_range(None, 100) is None
+    assert rules.byte_range("bytes=10-", 100) == (10, 99)
+    assert rules.byte_range("bytes=10-19", 100) == (10, 19)
+    assert rules.byte_range("bytes=90-500", 100) == (90, 99)
+    assert rules.byte_range("bytes=-30", 100) == (70, 99)
+    assert rules.byte_range("bytes=0-1,5-6", 100) is None  # several parts: all of it
+    assert rules.byte_range("items=0-1", 100) is None
+    for past in ("bytes=100-", "bytes=20-10", "bytes=-0"):
+        with pytest.raises(Rejected, match="range_not_satisfiable"):
+            rules.byte_range(past, 100)
+
+
+def test_a_file_keeps_its_name_without_a_path_or_hidden_dot() -> None:
+    assert rules.file_name("季度报告.pdf") == "季度报告.pdf"
+    assert rules.file_name("C:\\Users\\ann\\report.pdf") == "report.pdf"
+    assert rules.file_name("../../.env") == "env"
+    assert rules.file_name("a\x00b\n.txt") == "ab.txt"
+    with pytest.raises(Rejected):
+        rules.file_name("../")
+
+
+def test_a_downloaded_file_is_named_for_any_client_in_utf8_with_an_ascii_stand_in() -> None:
+    assert rules.content_disposition('季度 "Q3".pdf') == (
+        "attachment; filename=\"__ _Q3_.pdf\"; filename*=UTF-8''%E5%AD%A3%E5%BA%A6%20%22Q3%22.pdf"
+    )
+
+
+def test_a_files_type_is_kept_only_if_it_looks_like_one() -> None:
+    assert rules.media_type("application/PDF; charset=x") == "application/pdf"
+    assert rules.media_type("image/svg+xml") == "image/svg+xml"
+    for odd in (None, "", "pdf", "text/html\r\nX: y", "a/" + "b" * 200):
+        assert rules.media_type(odd) == "application/octet-stream"
+
+
+def test_a_file_size_reads_as_a_phone_shows_it() -> None:
+    assert rules.byte_size(512) == "512 B"
+    assert rules.byte_size(10_240) == "10.2 KB"
+    assert rules.byte_size(30_000_000) == "30.0 MB"
+
+
+def test_only_a_device_that_is_gone_unheld_and_without_an_unknown_input_can_be_removed() -> None:
+    gone = {"online": False, "problems": [], "held": False, "unknown_pending": False}
+    rules.check_device_removable(**gone)  # type: ignore[arg-type]
+    rules.check_device_removable(**gone | {"online": True, "problems": ["disconnected"]})  # type: ignore[arg-type]
+    for change, code in (
+        ({"online": True}, "device_connected"),
+        ({"held": True}, "device_in_use"),
+        ({"unknown_pending": True}, "unknown_effect_pending"),
+    ):
+        with pytest.raises(Rejected, match=code):
+            rules.check_device_removable(**gone | change)  # type: ignore[arg-type]

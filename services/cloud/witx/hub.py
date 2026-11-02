@@ -10,6 +10,7 @@ import contextlib
 import hashlib
 import logging
 import struct
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -150,9 +151,16 @@ class Hub:
     # ------------------------------------------------------------ cloud -> Gateway
 
     async def _dispatch_loop(self, session: Session) -> None:
+        """Sends what is due, and says every GATEWAY_HEARTBEAT that the Gateway is still
+        connected: a Gateway no process says this of is gone."""
+        beat = time.monotonic()
         while True:
             for message in await self.collect(session):
                 await session.send(message.model_dump_json())
+            if time.monotonic() - beat >= rules.GATEWAY_HEARTBEAT.total_seconds():
+                beat = time.monotonic()
+                async with self.db.tenant(session.tenant_id) as conn:
+                    await devices.touch_gateway(conn, session.gateway_id)
             await asyncio.sleep(self.poll_seconds)
 
     async def collect(self, session: Session) -> list[wire.CloudMessage]:

@@ -1,4 +1,4 @@
-"""Grants : a person approves a held input "and the same kind". Later
+"""Grants: a person approves a held input "and the same kind". Later
 inputs of the task on the same phone and app, with the same effects and recipient, go
 ahead without asking, a limited number of times; payments and orders never do."""
 

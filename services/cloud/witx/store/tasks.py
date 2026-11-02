@@ -15,7 +15,7 @@ from witx.store.db import execute, fetch, fetch_one, jsonb
 
 _TASK = """id, tenant_id, goal, constraints, status, revision, control_revision, model,
            device_ids, result, created_at, updated_at, permission_mode, group_id,
-           reasoning_effort, title, timezone, request, goal_paused, plan_mode"""
+           reasoning_effort, title, timezone, request, goal_paused, plan_mode, language"""
 
 
 def _task(row: RowMapping) -> Task:
@@ -36,6 +36,7 @@ def _task(row: RowMapping) -> Task:
         group_id=row["group_id"],
         reasoning_effort=row["reasoning_effort"],
         title=row["title"],
+        language=row["language"],
         timezone=row["timezone"],
         request=row["request"],
         goal_paused=row["goal_paused"],
@@ -567,8 +568,11 @@ async def untitled(conn: AsyncConnection, limit: int = 10) -> list[Task]:
     return [_task(r) for r in rows]
 
 
-async def set_title(conn: AsyncConnection, task_id: UUID, title: str | None) -> None:
-    """Stores the title, or counts a failed try (title None)."""
+async def set_title(
+    conn: AsyncConnection, task_id: UUID, title: str | None, language: str | None = None
+) -> None:
+    """Stores the title and the language of the first message, or counts a failed try
+    (title None)."""
     if title is None:
         await execute(
             conn, "UPDATE tasks SET title_tries = title_tries + 1 WHERE id = :id", id=task_id
@@ -577,9 +581,10 @@ async def set_title(conn: AsyncConnection, task_id: UUID, title: str | None) -> 
         row = await fetch_one(
             conn,
             # Titled outside any transaction: the task may have been deleted meanwhile.
-            "UPDATE tasks SET title = :t WHERE id = :id AND title IS NULL AND deleted_at IS NULL"
-            " RETURNING tenant_id",
+            "UPDATE tasks SET title = :t, language = :l"
+            " WHERE id = :id AND title IS NULL AND deleted_at IS NULL RETURNING tenant_id",
             t=title,
+            l=language,
             id=task_id,
         )
         if row is not None:

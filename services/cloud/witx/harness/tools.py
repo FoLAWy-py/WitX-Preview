@@ -27,7 +27,7 @@ INPUT_TOOLS = {
     "press_back": "back",
     "press_home": "home",
     "launch_app": "launch_app",
-    "find_app": "find_app",
+    "send_file": "receive_file",
 }
 
 
@@ -160,7 +160,8 @@ TOOLS: list[dict[str, Any]] = [
         "type_text",
         "Type text into the focused field. Never use it for passwords or codes. Tap the "
         "field first if it is not focused; the input is refused when the focused field is "
-        "not where you say it is.",
+        "not where you say it is. A text that ends with a new line also presses Return "
+        "(Go, Search) once it is in.",
         {
             "text": _string("Text to type."),
             "field_x": _number("Pixel x of a point inside the field you are typing into."),
@@ -218,8 +219,8 @@ TOOLS: list[dict[str, Any]] = [
     _input_tool(
         "launch_app",
         "Open an app installed on the device. By query: the best match among the installed "
-        "apps opens, and the result lists the other matches. By app_id: one a search "
-        "returned, or that this task already opened on this phone; never a guessed ID. "
+        "apps opens, and the result lists the other matches. By app_id: one of those "
+        "matches, or one this task already opened on this phone; never a guessed ID. "
         "Give one of the two, the other null. If nothing matches, look with the phone's "
         "own search next (the result says how); never install an app.",
         {
@@ -231,10 +232,12 @@ TOOLS: list[dict[str, Any]] = [
         },
     ),
     _input_tool(
-        "find_app",
-        "Search the apps installed on a device without opening one: the best matches, "
-        "best first. To open an app, use launch_app with the same query instead.",
-        {"query": _APP_QUERY},
+        "send_file",
+        "Put a file the user gave this task on the phone. The WitX app opens and downloads "
+        "it into its own folder; when it is done the file is listed there with a share "
+        "button, which hands it to another app (a chat, mail). Give its file_id from the "
+        "context.",
+        {"file_id": _string("ID of a file the user gave this task.")},
     ),
     _tool(
         "delegate",
@@ -581,10 +584,11 @@ def parse_input(name: str, args: dict[str, Any]) -> InputCall:
             "replace",
             "method",
             "scale",
+            "file_id",
         }
     }
     try:
-        payload = _action_input.validate_python({"kind": kind, **fields}).model_dump()
+        payload = _action_input.validate_python({"kind": kind, **fields}).model_dump(mode="json")
     except ValidationError as error:
         first = error.errors()[0]
         location = ".".join(str(p) for p in first["loc"][1:])
@@ -634,7 +638,3 @@ def parse_purchase_options(args: dict[str, Any]) -> list[PurchaseOption]:
 
 def _text_or_none(value: Any) -> str | None:
     return None if value is None else str(value)[:2000]
-
-
-# Without the switch, for deployments that turned web search off (WITX_WEB_SEARCH=off).
-TOOLS_WITHOUT_WEB = [t for t in TOOLS if t["name"] != "use_web_search"]

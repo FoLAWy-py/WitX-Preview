@@ -296,7 +296,7 @@ class RiskAssessor:
         allowed_providers: tuple[str, ...] | None,
         fast: bool = False,
     ) -> RiskCheck:
-        """The independent risk check. With ``fast`` (an owner's choice, D29), a
+        """The independent risk check. With ``fast`` (an owner's choice), a
         model the Decisions API serves and OpenAI allowed for the tenant, Decisions
         answers first; the full check runs only when it is not sure that nothing
         sensitive happens."""

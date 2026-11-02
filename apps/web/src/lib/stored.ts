@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
  * they last chose. Only a convenience: in a private window, or with storage blocked,
  * nothing is kept and the page works the same. */
 
-function read(key: string): unknown {
+export function read(key: string): unknown {
   try {
     const raw = localStorage.getItem(key);
     return raw === null ? undefined : JSON.parse(raw);
@@ -13,7 +13,7 @@ function read(key: string): unknown {
   }
 }
 
-function write(key: string, value: unknown): void {
+export function write(key: string, value: unknown): void {
   try {
     if (value === undefined || value === "") localStorage.removeItem(key);
     else localStorage.setItem(key, JSON.stringify(value));

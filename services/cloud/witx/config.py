@@ -60,6 +60,10 @@ def parse_models(spec: str) -> dict[str, CatalogModel]:
     return models
 
 
+# Where people open the Web app in development (make dev-web), unless WITX_PUBLIC_URL says.
+DEV_PUBLIC_URL = "http://127.0.0.1:47173"
+
+
 @dataclass(frozen=True)
 class Limits:
     observation_max_age: timedelta = timedelta(seconds=120)
@@ -74,8 +78,8 @@ class Limits:
     # them. Every screenshot stays stored either way. One keeps each step
     # fast: older screenshots cost seconds per call and are mostly not cached.
     context_images: int | None = 1
-    # Whether the agent may turn web search on for a task that needs it (use_web_search,
-    # D27). Each task starts without it.
+    # Whether the agent may turn web search on for a task that needs it (use_web_search).
+    # Each task starts without it.
     web_search: bool = True
     risk_timeout: timedelta = timedelta(seconds=20)
     # Context compression: earlier steps are summarized once this many steps have
@@ -84,6 +88,8 @@ class Limits:
     compress_after_steps: int = 40
     compress_at_tokens: int = 25_000
     compress_keep_steps: int = 8
+    # Where phones reach the cloud (WITX_PUBLIC_URL): the download links it signs.
+    public_url: str = DEV_PUBLIC_URL
 
 
 @dataclass(frozen=True)
@@ -106,7 +112,7 @@ class Settings:
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None
     # Where users reach the Web app: OIDC redirects, Secure cookies, the allowed Origin.
-    public_url: str = "http://127.0.0.1:5173"
+    public_url: str = DEV_PUBLIC_URL
     cors_origins: list[str] = field(default_factory=list)
     # Retention: screenshots of finished tasks, and what a deleted task leaves.
     screenshot_retention: timedelta = timedelta(days=30)
@@ -143,7 +149,7 @@ class Settings:
             oidc_jwks_url=env.get("WITX_OIDC_JWKS_URL"),
             oidc_client_id=env.get("WITX_OIDC_CLIENT_ID"),
             oidc_client_secret=env.get("WITX_OIDC_CLIENT_SECRET"),
-            public_url=env.get("WITX_PUBLIC_URL", "http://127.0.0.1:5173").rstrip("/"),
+            public_url=env.get("WITX_PUBLIC_URL", DEV_PUBLIC_URL).rstrip("/"),
             cors_origins=[o for o in env.get("WITX_CORS_ORIGINS", "").split(",") if o],
             screenshot_retention=timedelta(days=_int("WITX_SCREENSHOT_RETENTION_DAYS", 30)),
             audit_retention=timedelta(days=_int("WITX_AUDIT_RETENTION_DAYS", 90)),
@@ -157,6 +163,7 @@ class Settings:
                 compress_after_steps=_int("WITX_COMPRESS_AFTER_STEPS", 40),
                 compress_at_tokens=_int("WITX_COMPRESS_AT_TOKENS", 25_000),
                 compress_keep_steps=_int("WITX_COMPRESS_KEEP_STEPS", 8),
+                public_url=env.get("WITX_PUBLIC_URL", DEV_PUBLIC_URL).rstrip("/"),
             ),
         )
         if settings.default_model not in settings.catalog():

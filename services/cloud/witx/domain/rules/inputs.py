@@ -293,7 +293,7 @@ def check_permission_prompt(*, mode: PermissionMode, risk: RiskVerdict | None) -
 
 def found_rank(app_id: str, searches: Sequence[Sequence[Mapping[str, Any]]]) -> int | None:
     """Where ``app_id`` stands in the newest search that found it (0 = best match), or
-    None if no search did. ``searches`` lists find_app results, newest first."""
+    None if no search did. ``searches`` lists what launches by query found, newest first."""
     for found in searches:
         ids = [str(app["app_id"]) for app in found]
         if app_id in ids:
@@ -308,7 +308,7 @@ def _points(payload: Mapping[str, Any]) -> list[tuple[float, float]]:
     if kind == "type_text" and payload.get("field_x") is not None:
         return [(payload["field_x"], payload["field_y"])]
     if kind == "swipe":
-        # A path (a person's drag, #211) must stay on the screen too: every point counts.
+        # A path (a person's drag) must stay on the screen too: every point counts.
         along = [(p["x"], p["y"]) for p in payload.get("path") or []]
         return [(payload["x1"], payload["y1"]), *along, (payload["x2"], payload["y2"])]
     return []
@@ -370,11 +370,8 @@ def admit_input(
     check_points(payload, observation.screen.width, observation.screen.height)
 
 
-def result_effect(outcome: str, kind: str) -> Effect:
-    """Maps a Gateway dispatch outcome to the business-effect state. A search of the
-    installed apps reads, never writes: it has no effect."""
-    if kind == "find_app" and outcome == "returned":
-        return Effect.NO_EFFECT
+def result_effect(outcome: str) -> Effect:
+    """Maps a Gateway dispatch outcome to the business-effect state."""
     return {
         "rejected": Effect.NOT_ATTEMPTED,
         "returned": Effect.UNVERIFIED,

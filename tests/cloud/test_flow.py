@@ -25,6 +25,7 @@ from witx.domain.model import (
     WaitReason,
 )
 from witx.domain.rules import Rejected
+from witx.harness import tools
 from witx.harness.risk import describe_input
 from witx.hub import Session
 from witx.services import execution as exec_service
@@ -200,6 +201,24 @@ async def test_the_model_can_look_at_an_earlier_screenshot_again_for_one_turn(ri
     assert viewing.count("image_url") == 2  # the newest screenshot and the one asked for
     assert "Earlier screenshot" in viewing
     assert str(rig.model.requests[4].input).count("image_url") == 1
+
+
+async def test_the_agent_is_told_the_language_the_user_writes_in_once_it_is_known(
+    rig: Rig,
+) -> None:
+    rig.model.script = [
+        [call("complete_task", summary="Today is Sunday.", evidence_observation_ids=[])],
+    ]
+    task = await rig.create_task("Find out what day it is.", device_ids=[])
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        await tasks.set_title(conn, task.id, "What day it is", "English")
+    await rig.settle()
+
+    told = rig.model.requests[0].instructions
+    assert told.endswith(
+        "The user writes in English. Write to them in English, unless "
+        "their newest message is in another language."
+    )
 
 
 async def test_a_summary_in_another_language_than_the_request_is_sent_back(rig: Rig) -> None:
@@ -448,6 +467,22 @@ async def test_only_the_user_sets_the_goal(rig: Rig) -> None:
     assert "update_goal" not in offered and "complete_task" in offered
 
 
+async def test_a_run_is_offered_the_input_tools_of_its_phones_and_no_others(rig: Rig) -> None:
+    rig.model.script = [complete_plain] * 8
+    await rig.create_task("Open Wi-Fi settings")  # its phone: tap, swipe, back, home, launch_app
+    await rig.create_task("What day is tomorrow?", device_ids=[])
+    await rig.settle()
+
+    def offered(goal: str) -> set[str]:
+        request = next(r for r in rig.model.requests if goal in str(r.input[0]))
+        return {t["name"] for t in request.tools}
+
+    with_phone, without = offered("Wi-Fi"), offered("tomorrow")
+    assert {"tap", "press_back", "launch_app"} <= with_phone
+    assert not {"set_picker", "type_text", "select_option"} & with_phone
+    assert not set(tools.INPUT_TOOLS) & without and "complete_task" in without
+
+
 async def test_the_agent_is_told_the_start_time_in_the_user_s_time_zone(rig: Rig) -> None:
     rig.model.script = [complete_plain]
     task = await rig.create_task("What day is tomorrow?", device_ids=[], timezone="Asia/Shanghai")
@@ -584,52 +619,59 @@ async def test_denied_input_is_never_sent(rig: Rig) -> None:
     assert (await rig.root_run(task.id)).wait_reason == WaitReason.USER_INPUT
 
 
-async def test_unknown_effect_blocks_input_until_reconciled(rig: Rig) -> None:
+async def tapped_with_unknown_effect(rig: Rig) -> Task:
     device = rig.tenant.device_ids[0]
     rig.gateway.outcome = "unknown"
-    rig.model.script = [
-        [call("observe", device_id=device)],
-        lambda r: tap(r, device),
-        lambda r: tap(r, device),  # tries again: must be refused
-        [call("ask_user", question="Did the tap happen?")],
-    ]
+    rig.model.script = [[call("observe", device_id=device)], lambda r: tap(r, device)]
     task = await rig.create_task()
     await rig.settle()
+    return task
 
-    (first,) = await rig.actions(task.id)
-    assert first.effect == Effect.UNKNOWN
-    outputs = await rig.outputs(task.id)
-    assert outputs[2]["status"] == "rejected" and outputs[2]["code"] == "unknown_effect_pending"
-    assert len(rig.gateway.actions) == 1
 
-    # Reconciling needs a screenshot taken after the action.
+async def test_an_input_of_unknown_effect_waits_for_the_users_ruling_without_asking(
+    rig: Rig,
+) -> None:
+    task = await tapped_with_unknown_effect(rig)
+
+    (tapped,) = await rig.actions(task.id)
+    assert tapped.effect == Effect.UNKNOWN
+    run = await rig.root_run(task.id)
+    assert run.status == RunStatus.WAITING and run.wait_reason == WaitReason.UNKNOWN
+    assert len(rig.model.requests) == 2  # no model call to ask the user about it
+    assert (await rig.outputs(task.id))[1] == {"name": "tap"}  # its result: still open
+
+
+async def test_the_users_ruling_is_the_inputs_result_and_the_agent_goes_on(rig: Rig) -> None:
+    task = await tapped_with_unknown_effect(rig)
+    (tapped,) = await rig.actions(task.id)
     async with rig.db.tenant(rig.tenant.id) as conn:
+        # A ruling needs a screenshot taken after the input.
         with pytest.raises(exec_service.Rejected, match="observation_too_old"):
             await exec_service.reconcile(
                 conn,
-                action_id=first.id,
+                action_id=tapped.id,
                 effect="no_effect",
-                observation_id=first.observation_id,
+                observation_id=tapped.observation_id,
                 user_id=rig.tenant.user_id,  # type: ignore[arg-type]
             )
         await exec_service.reconcile(
             conn,
-            action_id=first.id,
+            action_id=tapped.id,
             effect="no_effect",
-            observation_id=first.post_observation_id,
+            observation_id=tapped.post_observation_id,
             user_id=rig.tenant.user_id,
         )
+    device = rig.tenant.device_ids[0]
     rig.gateway.outcome = "returned"
     rig.model.script = [lambda r: tap(r, device), complete]
-    async with rig.db.tenant(rig.tenant.id) as conn:
-        await lifecycle.add_input(
-            conn, task_id=task.id, user_id=rig.tenant.user_id, text="It did not."
-        )
     await rig.settle()
+
     assert (await rig.task(task.id)).status == TaskStatus.COMPLETED
-    assert len(rig.gateway.actions) == 2
+    result = (await rig.outputs(task.id))[1]
+    assert result["effect"] == "no_effect" and "it did not happen" in result["note"]
+    assert len(rig.gateway.actions) == 2  # tapped again, as the ruling allowed
     _, retry = await rig.actions(task.id)
-    assert retry.retry_of == first.id  # a new action ID, tied to the one it tries again
+    assert retry.retry_of == tapped.id  # a new action ID, tied to the one it tries again
 
 
 async def test_coordinates_must_refer_to_the_newest_screenshot(rig: Rig) -> None:
@@ -738,6 +780,46 @@ async def test_stop_is_a_barrier(rig: Rig) -> None:
     assert (await rig.task(task.id)).status == TaskStatus.STOPPED
     (action,) = await rig.actions(task.id)
     assert action.effect == Effect.UNVERIFIED  # the late result is still recorded
+
+
+async def test_a_stop_no_gateway_confirms_can_be_forced_and_the_input_in_flight_becomes_unknown(
+    rig: Rig,
+) -> None:
+    device = rig.tenant.device_ids[0]
+    rig.gateway.hold_actions = True
+    rig.model.script = [[call("observe", device_id=device)], lambda r: tap(r, device)]
+    task = await rig.create_task()
+    await rig.settle()
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        await lifecycle.stop(conn, task.id)
+        epoch = (await devices.get(conn, device)).epoch  # type: ignore[union-attr]
+    await rig.gateway_round()  # the Gateway gets the stop, and never confirms it
+
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        forced = await lifecycle.force_stop(conn, task_id=task.id, now=now())
+        assert await devices.task_leases(conn, task.id) == []
+        assert (await devices.get(conn, device)).epoch > epoch  # type: ignore[union-attr]
+    assert (await rig.task(task.id)).status == TaskStatus.STOPPED
+    (action,) = await rig.actions(task.id)
+    assert forced.unknown == [action.id] and forced.released == [device]
+    assert (action.effect, action.reason) == (Effect.UNKNOWN, "stop_forced")
+
+    # Should the Gateway come back, what it says for the old lease changes nothing.
+    held = rig.gateway.held.pop()
+    await rig.finish_action(held, "returned")
+    stop = rig.gateway.stops[0]
+    await rig.handle(wire.StopAck(stop_id=stop.stop_id, device_id=stop.device_id))
+    (action,) = await rig.actions(task.id)
+    assert action.effect == Effect.UNKNOWN  # only a person settles it, from a new screenshot
+
+
+async def test_only_a_stop_already_asked_for_can_be_forced(rig: Rig) -> None:
+    rig.model.script = [[call("observe", device_id=rig.tenant.device_ids[0])]]
+    task = await rig.create_task()
+    async with rig.db.tenant(rig.tenant.id) as conn:
+        with pytest.raises(Rejected, match="not_stopping"):
+            await lifecycle.force_stop(conn, task_id=task.id, now=now())
+    assert (await rig.task(task.id)).status == TaskStatus.ACTIVE
 
 
 async def pause(rig: Rig, task_id: UUID) -> Task:

@@ -1,6 +1,6 @@
 """`witx-gateway --config gateway.toml doctor`: what this computer and each connected device
 still need before tasks can run, and the command that fixes each. It only looks; it never
-installs or changes anything (device pool, #33). ``setup`` does the fixing."""
+installs or changes anything (device pool). ``setup`` does the fixing."""
 
 import sys
 from dataclasses import dataclass

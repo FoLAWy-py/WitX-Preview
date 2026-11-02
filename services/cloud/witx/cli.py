@@ -20,6 +20,7 @@ from witx.api.app import create_app
 from witx.api.auth import Authenticator, DevAuthenticator, OidcAuthenticator, OidcLogin
 from witx.config import Settings, plugins_dir
 from witx.domain import rules
+from witx.domain.rules import Rejected
 from witx.harness import plugins, skills
 from witx.harness.compress import Compressor
 from witx.harness.loop import Harness
@@ -34,9 +35,9 @@ from witx.models.router import ModelRouter
 from witx.objects import object_store_from_url
 from witx.services import health as readiness_checks
 from witx.services import identity as identity_service
-from witx.services import ledger, recovery
-from witx.store import devices, identity
-from witx.store.db import Database, migrate
+from witx.services import ledger, lifecycle, recovery
+from witx.store import devices, execution, identity, tasks
+from witx.store.db import Database, fetch_one, migrate
 from witx.worker import (
     Worker,
     maintain_forever,
@@ -396,6 +397,49 @@ async def _change_gateway(gateway_id: UUID, change: str) -> None:
     print(f"gateway {gateway_id}: {change}d{after}")
 
 
+async def _force_stop(task_id: UUID, yes: bool) -> None:
+    """Shows what a forced stop does to the task, and does it once confirmed."""
+    db = Database(_admin_url())
+    try:
+        async with db.system() as conn:
+            row = await fetch_one(conn, "SELECT tenant_id FROM tasks WHERE id = :t", t=task_id)
+        if row is None:
+            raise SystemExit(f"no task {task_id}")
+        async with db.tenant(row["tenant_id"]) as conn:
+            task = await tasks.get(conn, task_id)
+            if task is None:  # deleted: only its tombstone is left
+                raise SystemExit(f"no task {task_id}")
+            held = await devices.task_leases(conn, task_id)
+            names = {d.id: d.name for d in await devices.list_all(conn)}
+            sent = [
+                a for a in await execution.task_actions(conn, task_id) if a.status.value == "sent"
+            ]
+        print(f"task {task_id}: {task.status.value}")
+        for lease in held:
+            print(f"  holds {names.get(lease.device_id, lease.device_id)} ({lease.device_id})")
+        print(
+            f"  {len(sent)} input(s) sent without a result: they become unknown, and their "
+            "device takes no input until a person settles them from a newer screenshot"
+        )
+        rules.check_force_stop(task.status)
+        if not _confirm(
+            "Force the stop without the Gateway's confirmation? Do it only when that "
+            "Gateway is gone for good",
+            yes,
+        ):
+            raise SystemExit("nothing changed")
+        async with db.tenant(row["tenant_id"]) as conn:
+            done = await lifecycle.force_stop(conn, task_id=task_id, now=datetime.now(UTC))
+    except Rejected as error:
+        raise SystemExit(error.detail or error.code) from None
+    finally:
+        await db.close()
+    print(
+        f"task {task_id}: stopped; {len(done.released)} device(s) released, "
+        f"{len(done.unknown)} input(s) now unknown"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="witx")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -407,7 +451,7 @@ def main() -> None:
     )
     p_api = sub.add_parser("api", help="serve the HTTP API and the Gateway hub")
     p_api.add_argument("--host", default="127.0.0.1")
-    p_api.add_argument("--port", type=int, default=8000)
+    p_api.add_argument("--port", type=int, default=47100)
     p_worker = sub.add_parser("worker", help="run the agent worker")
     p_worker.add_argument("--concurrency", type=int, default=4)
     p_plugin = sub.add_parser("plugin", help="the plugins the agent's skills come from")
@@ -445,6 +489,12 @@ def main() -> None:
         help="after restoring the database from a backup: replay the ledger, stop what was "
         "in flight (run before starting the API and workers)",
     )
+    p_force = admin.add_parser(
+        "force-stop",
+        help="finish a task's stop that no Gateway will confirm, because its Gateway is gone",
+    )
+    p_force.add_argument("task_id", type=UUID)
+    p_force.add_argument("--yes", action="store_true", help="do not ask")
     for change, what in (
         ("disable", "stop a Gateway until it is enabled again"),
         ("enable", "let a disabled Gateway connect again"),
@@ -474,5 +524,7 @@ def main() -> None:
         asyncio.run(_recover())
     elif args.admin_command == "list-gateways":
         asyncio.run(_list_gateways())
+    elif args.admin_command == "force-stop":
+        asyncio.run(_force_stop(args.task_id, args.yes))
     elif args.admin_command.endswith("-gateway"):
         asyncio.run(_change_gateway(args.gateway_id, args.admin_command.removesuffix("-gateway")))

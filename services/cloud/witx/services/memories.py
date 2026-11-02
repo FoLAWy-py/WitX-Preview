@@ -1,4 +1,4 @@
-"""Long-term memory : a person's own entries for their future
+"""Long-term memory: a person's own entries for their future
 tasks. The task's agent keeps what it learns on its own (after Claude Code's auto
 memory); the person sees each entry, can undo or delete it, and can turn this off. Runs
 inside the caller's transaction."""
@@ -29,11 +29,11 @@ async def save(
     text: str,
     replaces: UUID | None = None,
 ) -> Memory:
-    """What the task's agent keeps for the person who started the task, without asking. With
-        ``replaces``, one of the entries an agent kept is brought up to date.
+    """What the task's agent keeps for the person who started the task, without asking.
+    With ``replaces``, one of the entries an agent kept is brought up to date.
 
     What it may keep is limited to what it can know for that person: their preferences
-    and corrections only from the main agent (sub-agents never hear the person, D57) and
+    and corrections only from the main agent (sub-agents never hear the person) and
     only while nobody else wrote in the task; notes about an app only for an app this
     task's screenshots showed, and never a sensitive one."""
     owner = await tasks.creator(conn, task.id)

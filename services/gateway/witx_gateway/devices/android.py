@@ -30,6 +30,8 @@ KEYCODE_PASTE = 279
 KEYCODE_A = 29
 META_CTRL = 0x3000  # META_CTRL_ON | META_CTRL_LEFT_ON
 _APP_ID = re.compile(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+")
+# Packages Appium installs on the phone to drive it.
+APPIUM_PACKAGES = "io.appium."
 
 
 class AndroidDevice(AppiumDevice):
@@ -55,7 +57,6 @@ class AndroidDevice(AppiumDevice):
         "volume_down",
         "lock",
         "launch_app",
-        "find_app",
     ]
 
     def __init__(
@@ -195,12 +196,18 @@ class AndroidDevice(AppiumDevice):
             raise DeviceError("invalid_app_id")
         await self._script("mobile: activateApp", {"appId": app_id})
 
+    async def open_link(self, url: str, app_id: str) -> None:
+        # No receive_file on Android until it has a WitX app.
+        await self._script("mobile: deepLink", {"url": url, "package": app_id})
+
     async def list_apps(self) -> dict[str, str | None]:
         # Android reports package names only; the agent searches with English words.
+        # Appium's own helpers (io.appium.settings, ...) are the Gateway's tooling, never
+        # an app the person means: "Settings" must open com.android.settings.
         apps = await self._script("mobile: listApps", {})
         if not isinstance(apps, dict):
             raise DeviceError("app_list_unavailable")
-        return {str(app_id): None for app_id in apps}
+        return {str(a): None for a in apps if not str(a).startswith(APPIUM_PACKAGES)}
 
 
 def _blank(png: bytes) -> bool:

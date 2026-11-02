@@ -27,6 +27,7 @@ from witx_gateway.devices.base import (
 )
 from witx_gateway.devices.ios import IOSDevice
 from witx_gateway.journal import Journal
+from witx_gateway.options import Option
 
 Requests = list[tuple[str, str, object]]
 
@@ -1089,6 +1090,11 @@ async def test_android_lists_installed_packages_without_names() -> None:
     assert await android([]).list_apps() == {"com.huawei.calculator": None}
 
 
+async def test_android_does_not_list_the_apps_appium_installs_to_drive_it() -> None:
+    world = {"apps": {"io.appium.settings": {}, "com.android.settings": {}}}
+    assert await android([], world).list_apps() == {"com.android.settings": None}
+
+
 async def test_an_iphone_app_is_found_by_its_bundle_name_too() -> None:
     names = {"CFBundleDisplayName": "rednote", "CFBundleName": "小红书"}
     world = {"apps": {"com.xingin.discover": names, "com.apple.Maps": {"CFBundleName": "Maps"}}}
@@ -1244,13 +1250,39 @@ async def test_a_list_that_cannot_be_read_before_the_first_swipe_says_why_and_to
     assert gestures(requests) == [] and taps(requests) == []
 
 
-async def test_the_search_for_an_option_gives_up_when_its_time_is_up(
+async def test_the_search_for_an_option_gives_up_when_its_time_is_up_even_mid_swipe(
     quick_scrolling: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("witx_gateway.devices.appium.SELECT_BUDGET", 0)
+    monkeypatch.setattr("witx_gateway.devices.appium.SELECT_BUDGET", 0.2)
     device, _, requests = countries([f"Country {i}" for i in range(500)])
-    result = await device.select_option(300, 400, "Country 400")
+    swipe = device.swipe
+
+    async def slow_swipe(*args: Any, **kwargs: Any) -> None:  # a phone that is very slow
+        await swipe(*args, **kwargs)
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(device, "swipe", slow_swipe)
+    async with asyncio.timeout(2):  # well before the swipe would have ended
+        result = await device.select_option(300, 400, "Country 400")
     assert result.problem == "not_found" and taps(requests) == []
+
+
+async def test_a_list_that_cannot_be_read_in_time_says_so_and_touches_nothing(
+    quick_scrolling: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("witx_gateway.devices.appium.SELECT_BUDGET", 0.2)
+    device, _, requests = countries([f"Country {i}" for i in range(30)])
+    read = device._options
+
+    async def slow_read() -> list[Option]:
+        await asyncio.sleep(30)
+        return await read()
+
+    monkeypatch.setattr(device, "_options", slow_read)
+    async with asyncio.timeout(2):
+        result = await device.select_option(300, 400, "Country 20")
+    assert (result.selected, result.problem) == (None, "timeout")
+    assert gestures(requests) == [] and taps(requests) == []
 
 
 async def test_two_calls_at_once_open_one_session_not_two() -> None:

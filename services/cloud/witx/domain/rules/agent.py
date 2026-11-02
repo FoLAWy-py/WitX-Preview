@@ -260,6 +260,9 @@ _LATIN_WORD = re.compile("[A-Za-z\u00c0-\u024f]{2,}")
 _QUOTED = re.compile(
     '\u201c[^\u201d]*\u201d|\u300c[^\u300d]*\u300d|\u300e[^\u300f]*\u300f|"[^"]*"|`[^`]*`'
 )
+# A quote block or a fenced code block: text the user asked for in another language (a
+# translation, a message to send in it), which the reply holds as it is.
+_BLOCKS = re.compile(r"^```.*?^```|^>.*$", re.MULTILINE | re.DOTALL)
 # A request is in CJK with this many CJK characters (a name in one, "Text 张三", is not).
 # A reply to a request in Latin script with WRONG_LANGUAGE_CJK CJK characters of its own
 # is in another language; one to a CJK request with fewer than WRONG_LANGUAGE_CJK_FEW and
@@ -272,7 +275,7 @@ WRONG_LANGUAGE_WORDS = 4
 
 def _script(text: str) -> tuple[int, int]:
     """CJK characters and Latin words outside quotes."""
-    own = _QUOTED.sub(" ", text)
+    own = _QUOTED.sub(" ", _BLOCKS.sub(" ", text))
     return len(_CJK.findall(own)), len(_LATIN_WORD.findall(own))
 
 
@@ -308,7 +311,7 @@ def queued_input(
 
 # Why a run that waits for the user stopped, when it did not ask a question: the user
 # decides how it goes on, so the main agent cannot wake it. "unconfirmed" (a
-# completion the check of D37 kept contradicting) is no longer written, but runs that
+# completion the goal check kept contradicting) is no longer written, but runs that
 # stopped for it before still wait for their user.
 STOPPED_FOR_USER = ("unconfirmed", "plan", "repeating")
 
@@ -420,3 +423,40 @@ def ask_options(options: object, recommended: object) -> tuple[list[str], int | 
     if isinstance(recommended, bool) or not isinstance(recommended, int):
         return kept, None
     return kept, recommended if 0 <= recommended < len(kept) else None
+
+
+def offered_tools(
+    names: Iterable[str],
+    inputs: Mapping[str, str],
+    *,
+    capabilities: Collection[str],
+    phones: int,
+    plan_mode: bool,
+    sub_agent: bool,
+    can_delegate: bool,
+    web_search: bool,
+    files: bool = False,
+) -> set[str]:
+    """The tools of ``names`` a run is offered: all but those it cannot use as it
+    stands. Every tool's schema goes with every model call, so one the run cannot use
+    only costs tokens. An input tool (``inputs`` maps it to the input it sends) needs a
+    phone of the run that takes that input (``capabilities``). The rest depend on facts
+    that seldom change in a run, since the tools head what the provider caches: a phone
+    joining, plan mode turned on or off, or the task's first file (``files``) costs one
+    miss."""
+    needs = {
+        "use_web_search": web_search,
+        "propose_purchase": phones > 1,  # it compares where to buy across phones
+        "present_plan": plan_mode and not sub_agent,
+        "draft_skill": not sub_agent,
+        # A side turn, where the last two are used, comes only while sub-agents work.
+        "delegate": can_delegate,
+        "message_agent": can_delegate,
+        "stop_agent": can_delegate,
+        "send_file": files,  # a file the user gave the task
+    }
+    return {
+        name
+        for name in names
+        if needs.get(name, True) and (name not in inputs or inputs[name] in capabilities)
+    }

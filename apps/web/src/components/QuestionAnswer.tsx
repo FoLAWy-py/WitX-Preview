@@ -11,7 +11,7 @@ import { Button } from "./ui/base";
  * per line with the recommended one first, each sent with one tap as if typed; and a
  * box for any other answer, sent with Enter. Either way the reply is the person's
  * message and the agent carries on. A sub-agent's question is answered to it alone
- * (``runId``, D57); the message box at the bottom writes to the main agent.
+ * (``runId``); the message box at the bottom writes to the main agent.
  */
 export function QuestionAnswer({
   task,

@@ -122,7 +122,7 @@ def test_a_running_simulator_is_ready_and_a_shut_down_one_is_not() -> None:
         appium_url="http://127.0.0.1:4723",
     )
     off = IOSDevice(
-        udid="22222222-2222-4222-8222-222222222222",
+        udid="F568591A-51C5-4428-A35C-4E3A9708282B",
         name="iPhone 18 Pro",
         appium_url="http://127.0.0.1:4723",
     )
@@ -413,7 +413,7 @@ def test_a_phone_with_something_else_to_fix_reports_that_rather_than_not_respond
 # ---------------------------------------------------------------- settings read again
 
 IPHONE_17 = "00000000-0000000000000001"
-SIM_18 = "22222222-2222-4222-8222-222222222222"
+SIM_18 = "F568591A-51C5-4428-A35C-4E3A9708282B"
 TWO_IPHONES = Scan(
     android=[],
     iphones=[Found("ios", IPHONE_17, "iPhone 17 Pro")],

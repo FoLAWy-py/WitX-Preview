@@ -1,4 +1,4 @@
-"""A person taking over a device .
+"""A person taking over a device.
 
 A task's device can be taken over once the task is paused: the pause put a barrier in
 place, so no input of the agent is in flight or can start. A device no task holds can

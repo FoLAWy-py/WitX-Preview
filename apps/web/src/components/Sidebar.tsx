@@ -427,6 +427,56 @@ function Section({
 
 /** The left column: a new task, search, the schedules, the phones, the task groups, the
  * tasks and the account. */
+/** How many tasks wait for the person (an approval, a question, an unknown input), and
+ * the way to them: the one task, or a list to pick from when there are several. */
+function NeedsYou({ tasks }: { tasks: TaskSummary[] }) {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const label = t("sidebar.needs", { count: tasks.length });
+  const badge =
+    "rounded-full bg-amber-soft px-1.5 text-[11.5px] text-amber tnum hover:bg-amber/20 focus-visible:outline-2 focus-visible:outline-accent";
+  if (tasks.length === 1) {
+    const only = tasks[0];
+    return (
+      <Link
+        to={`/tasks/${only.id}`}
+        title={t("sidebar.needsOpen", { title: only.title ?? only.request })}
+        className={badge}
+      >
+        {label}
+      </Link>
+    );
+  }
+  return (
+    <Menu
+      label={t("sidebar.needsList")}
+      placement="bottom-end"
+      minWidth={240}
+      entries={[
+        { header: t("sidebar.needsList"), id: "header" },
+        ...tasks.map((task) => ({
+          id: task.id,
+          label: task.title ?? task.request,
+          onSelect: () => navigate(`/tasks/${task.id}`),
+        })),
+      ]}
+      trigger={({ ref, open, toggle, onKeyDown }) => (
+        <button
+          ref={ref}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={toggle}
+          onKeyDown={onKeyDown}
+          className={cn(badge, "cursor-pointer")}
+        >
+          {label}
+        </button>
+      )}
+    />
+  );
+}
+
 export function Sidebar({
   collapsed,
   onToggle,
@@ -752,11 +802,7 @@ export function Sidebar({
                 title={t("nav.tasks")}
                 extra={
                   <span className="flex items-center gap-1">
-                    {needs > 0 && (
-                      <span className="rounded-full bg-amber-soft px-1.5 text-[11.5px] text-amber tnum">
-                        {t("sidebar.needs", { count: needs })}
-                      </span>
-                    )}
+                    {needs > 0 && <NeedsYou tasks={attention.data ?? []} />}
                     <button
                       type="button"
                       aria-label={t("groups.new")}

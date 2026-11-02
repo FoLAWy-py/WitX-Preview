@@ -386,7 +386,7 @@ class IOSDevice(AppiumDevice):
         "home",
         "lock",
         "launch_app",
-        "find_app",
+        "receive_file",
     ]
 
     def __init__(
@@ -870,6 +870,9 @@ class IOSDevice(AppiumDevice):
 
     async def launch_app(self, app_id: str) -> None:
         await self._script("mobile: activateApp", {"bundleId": app_id})
+
+    async def open_link(self, url: str, app_id: str) -> None:
+        await self._script("mobile: deepLink", {"url": url, "bundleId": app_id})
 
     async def list_apps(self) -> dict[str, str | None]:
         if SIMULATOR_UDID.match(self.native_id):

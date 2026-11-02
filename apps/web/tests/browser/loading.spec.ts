@@ -4,7 +4,10 @@ import { openTask, signIn } from "./fixtures/auth";
 import { task } from "./fixtures/task";
 
 // The dev server serves each source file as its own module.
-const SETTINGS_CODE = "**/src/pages/Settings.tsx*";
+const SETTINGS_CODE = "**/assets/Settings-*.js";
+// The Customize page's code, as the build names it.
+const customize = (asked: string[]) =>
+  asked.some((path) => /\/assets\/Customize-[\w-]+\.js$/.test(path));
 
 async function openSettings(page: Page) {
   await page.getByRole("button", { name: "Account menu" }).click();
@@ -19,13 +22,22 @@ function countLoads(page: Page) {
 
 test("a page whose code is gone after an update opens after one reload", async ({
   page,
+  browserName,
 }) => {
+  // After a real update the reload asks for the new build's file, under another name.
+  // Here the name stays, and WebKit keeps a module that failed to load across the reload
+  // without asking again, so only the other engine can play this out.
+  test.skip(
+    browserName === "webkit",
+    "the same file name cannot load again in WebKit",
+  );
   await mockApi(page, []);
   let refused = false;
+  // Gone after an update: the server answers 404 for the old file, once.
   await page.route(SETTINGS_CODE, (route) => {
     if (refused) return route.continue();
     refused = true;
-    return route.abort();
+    return route.fulfill({ status: 404 });
   });
   await signIn(page);
   await page.waitForURL("/");
@@ -58,7 +70,7 @@ test("agent text stays readable as plain text when its formatter cannot load", a
   page,
 }) => {
   await mockApi(page, []);
-  await page.route("**/src/components/Markdown.tsx*", (route) => route.abort());
+  await page.route("**/assets/Markdown-*.js", (route) => route.abort());
   const result = {
     summary: "**Sound** is off.",
     evidence_observation_ids: [],
@@ -105,11 +117,11 @@ test("pointing at a link to a page starts loading it before the click", async ({
   page.on("request", (request) => asked.push(new URL(request.url()).pathname));
   await signIn(page);
   await page.waitForURL("/");
-  expect(asked).not.toContain("/src/pages/Customize.tsx");
+  expect(customize(asked)).toBe(false);
 
   await page.getByRole("link", { name: "Customize", exact: true }).hover();
 
-  await expect.poll(() => asked).toContain("/src/pages/Customize.tsx");
+  await expect.poll(() => customize(asked)).toBe(true);
   expect(page.url()).not.toMatch(/\/customize$/);
 });
 
@@ -131,5 +143,5 @@ test("nothing is loaded ahead while the browser saves data", async ({
 
   // A prefetch starts at once (the test above); give it time to show up anyway.
   await page.waitForTimeout(500);
-  expect(asked).not.toContain("/src/pages/Customize.tsx");
+  expect(customize(asked)).toBe(false);
 });

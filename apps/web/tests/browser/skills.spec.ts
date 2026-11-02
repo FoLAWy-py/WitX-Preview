@@ -680,3 +680,43 @@ test("a skill is deleted with its versions kept, unless the person also deletes 
     .click();
   await expect.poll(() => deleted).toEqual(["?purge=true", ""]);
 });
+
+test("one search box, centred under the tabs, filters the plugins and what a marketplace offers", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  const installed = (name: string) => ({
+    name,
+    marketplace: "witx-preview",
+    version: "1.0.0",
+    commit: "c".repeat(40),
+  });
+  await marketplaces(
+    page,
+    [installed("basics"), installed("travel")],
+    [OFFER, { ...OFFER, name: "food", description: "Order food" }],
+  );
+  await signIn(page, "/customize?tab=plugins");
+
+  const search = page.getByRole("searchbox", { name: "Search plugins" });
+  const tabs = page.getByRole("tablist", { name: "Customize" });
+  // The box around the field (its icon and the field), centred under the tabs.
+  const [box, bar] = [
+    await search.locator("xpath=..").boundingBox(),
+    await tabs.boundingBox(),
+  ];
+  expect(
+    Math.abs(box!.x + box!.width / 2 - (bar!.x + bar!.width / 2)),
+  ).toBeLessThan(2);
+
+  await search.fill("trav");
+  const list = page.getByRole("region", { name: "Installed" });
+  await expect(list.getByText("travel")).toBeVisible();
+  await expect(list.getByText("basics")).toBeHidden();
+
+  await search.fill("food");
+  await expect(list.getByText("No plugin matches.")).toBeVisible();
+  await page.getByRole("button", { name: "Look" }).click();
+  await expect(page.getByText("Order food")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Install" })).toHaveCount(1);
+});

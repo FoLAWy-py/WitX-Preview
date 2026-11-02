@@ -48,7 +48,7 @@ class SimulatedGateway:
     stops: list[wire.Stop] = field(default_factory=list)
     held: list[wire.Action] = field(default_factory=list)
     manual: list[wire.ManualInput] = field(default_factory=list)  # a person's input
-    # What find_app, or launch_app by query, finds; the latter opens the first.
+    # What launch_app by query finds; it opens the first.
     found_apps: list[dict[str, Any]] = field(default_factory=list)
     field_text: str | None = None  # what the field holds after type_text (None: unread)
     field_name: str | None = None  # ... and what the app calls it
@@ -144,6 +144,7 @@ class Rig:
                 model="test-model",
                 permission_mode=kw.get("permission_mode", PermissionMode.AUTO),
                 timezone=kw.get("timezone", "UTC"),
+                file_ids=kw.get("file_ids", ()),
             )
 
     async def settle(self, rounds: int = 20) -> None:
@@ -207,7 +208,7 @@ class Rig:
         by_query = action.input.kind == "launch_app" and action.input.query is not None
         if by_query and outcome == "returned" and not self.gateway.found_apps:
             outcome = "app_not_found"  # nothing to open: rejected below, with this reason
-        search = (action.input.kind == "find_app" or by_query) and outcome == "returned"
+        search = by_query and outcome == "returned"
         reason = "epoch" if outcome == "rejected" else None
         if outcome == "app_not_found":
             outcome, reason = "rejected", "app_not_found"

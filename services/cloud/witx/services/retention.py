@@ -1,4 +1,4 @@
-"""Deleting a task and enforcing retention .
+"""Deleting a task and enforcing retention.
 
 Deleting writes a tombstone (the task disappears at once) with a minimal audit summary.
 The purge, run by the worker, then removes the task's screenshots and rows; the
@@ -21,10 +21,10 @@ from witx_contracts import logs
 from witx.domain import rules
 from witx.domain.model import TaskStatus
 from witx.domain.rules import Rejected
-from witx.objects import ObjectStore, screenshot_key
+from witx.objects import ObjectStore, file_key, screenshot_key
 from witx.services import ledger
 from witx.services.identity import Actor
-from witx.store import identity, retention
+from witx.store import files, identity, retention
 from witx.store.db import Database
 
 log = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ async def delete_task(
 class Purged:
     tasks: int = 0
     screenshots: int = 0
+    files: int = 0  # uploaded and never attached to a task
     tombstones: int = 0
     idempotency_keys: int = 0
 
@@ -109,6 +110,8 @@ async def _purge_tenant(
             # what is left to delete, and deleting a missing object is fine.
             for observation_id in observations:
                 await objects.delete(screenshot_key(tenant_id, observation_id))
+            for file in await files.of_task(conn, task_id):
+                await objects.delete(file_key(tenant_id, file.id))
             await retention.purge_task_rows(conn, task_id, now)
         done.tasks += 1
     async with db.tenant(tenant_id) as conn:
@@ -119,6 +122,11 @@ async def _purge_tenant(
             await objects.delete(key)
         await retention.mark_screenshots_purged(conn, [i for i, _ in expired])
         done.screenshots += len(expired)
+        unattached = await files.unattached(conn, before=now - rules.UNATTACHED_TTL, limit=batch)
+        for file_id in unattached:
+            await objects.delete(file_key(tenant_id, file_id))
+        await files.delete(conn, unattached)
+        done.files += len(unattached)
         done.tombstones += await retention.drop_tombstones(conn, before=now - audit_retention)
         done.idempotency_keys += await retention.drop_idempotency_keys(
             conn, before=now - rules.IDEMPOTENCY_TTL

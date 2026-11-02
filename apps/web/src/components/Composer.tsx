@@ -32,6 +32,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { DeviceView, ScheduleView, TaskDetail } from "@/api/types.gen";
+import {
+  AttachButton,
+  PickedFiles,
+  useAttachments,
+} from "@/components/Attachments";
 import { effortOn, effortsOf, shownModel, type Effort } from "@/lib/efforts";
 import { useI18n, type MessageKey, type Translate } from "@/i18n";
 import { useAuth } from "@/lib/auth";
@@ -170,7 +175,7 @@ const effortLook: Record<Effort, { icon?: LucideIcon; className: string }> = {
 
 /** The model and how hard it thinks, in one menu: the trigger reads "gpt-6-luna · High";
  * the effort is chosen below the models, from those the shown model offers (medium by
- * default; some models go down to low, #287). */
+ * default; some models go down to low). */
 export function ModelSelect({
   model,
   effort,
@@ -392,6 +397,8 @@ export function NewTaskComposer({
   const [group, setGroup] = useState<string>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  // Files to send with the first message; a schedule does not take them.
+  const files = useAttachments(draftKey(me?.user_id, "new.files"));
   const [schedule, setSchedule] = useState<ScheduleSpec>();
   const [scheduling, setScheduling] = useState(openSchedule);
   const [scheduled, setScheduled] = useState<ScheduleView>();
@@ -459,6 +466,11 @@ export function NewTaskComposer({
       goalRef.current?.focus();
       return;
     }
+    if (files.pending) return;
+    if (schedule && files.items.length) {
+      setError(t("files.notScheduled"));
+      return;
+    }
     setBusy(true);
     setError(undefined);
     setScheduled(undefined);
@@ -489,12 +501,15 @@ export function NewTaskComposer({
       }
       // A group deleted meanwhile is no longer offered: the task goes in none.
       const filed = groups.data?.some((g) => g.id === group);
-      const task = await api.createTask(
-        filed ? { ...request, group_id: group } : request,
-      );
+      const task = await api.createTask({
+        ...request,
+        ...(filed ? { group_id: group } : {}),
+        ...(files.ids.length ? { file_ids: files.ids } : {}),
+      });
       // Sent: the draft is done with.
       setGoal("");
       setConstraints("");
+      files.clear();
       refresh();
       navigate(`/tasks/${task.id}`);
     } catch (err) {
@@ -534,6 +549,7 @@ export function NewTaskComposer({
         }}
         className="block max-h-[40vh] min-h-[52px] w-full resize-none bg-transparent px-3 py-2.5 text-[16px] leading-relaxed placeholder:text-faint focus:outline-none [field-sizing:content]"
       />
+      <PickedFiles files={files} />
       {showConstraints && (
         <div className="px-3 pb-2">
           <label
@@ -589,6 +605,7 @@ export function NewTaskComposer({
               />
             )}
           />
+          <AttachButton files={files} />
           <MultiSelect
             label={t("composer.devices")}
             icon={Smartphone}
@@ -654,7 +671,7 @@ export function NewTaskComposer({
         </div>
         <button
           type="submit"
-          disabled={busy || !goal.trim()}
+          disabled={busy || !goal.trim() || files.pending}
           aria-label={t(schedule ? "schedule.submit" : "composer.start")}
           className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fg text-bg disabled:opacity-25 pointer-coarse:h-11 pointer-coarse:w-11"
         >
@@ -849,6 +866,8 @@ export function TaskComposer({
   }, [draft]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  // Files to send with the next message.
+  const files = useAttachments(draftKey(me?.user_id, `${task.id}.files`));
   const stopping = task.status === "stopping";
   const finished = ["stopped", "completed", "failed"].includes(task.status);
   // The message box answers the main agent; a sub-agent's question has its own card.
@@ -883,10 +902,12 @@ export function TaskComposer({
     try {
       await api.withdrawInput(task.id, seq);
       // Back in the box at once: the text is not lost if the refresh fails.
-      if (edit && input)
+      if (edit && input) {
         setText((current) =>
           current ? `${input.text}\n${current}` : input.text,
         );
+        files.restore((task.files ?? []).filter((f) => f.input_seq === seq));
+      }
       await onChanged();
     } catch (err) {
       setError((err as Error).message);
@@ -919,12 +940,19 @@ export function TaskComposer({
 
   async function send() {
     const body = text.trim();
-    if (!body || stopping) return;
+    if (!body || stopping || files.pending) return;
     // Like a chat: writing to a paused task carries on with it.
     const sent = await run(() =>
-      api.addInput(task.id, { text: body, resume: true }),
+      api.addInput(task.id, {
+        text: body,
+        resume: true,
+        ...(files.ids.length ? { file_ids: files.ids } : {}),
+      }),
     );
-    if (sent) setText("");
+    if (sent) {
+      setText("");
+      files.clear();
+    }
   }
 
   const live = ["active", "pausing", "paused"].includes(task.status);
@@ -1191,8 +1219,10 @@ export function TaskComposer({
         }}
         className="block max-h-[30vh] min-h-[44px] w-full resize-none bg-transparent px-3 py-2.5 text-[15px] leading-relaxed placeholder:text-faint focus:outline-none [field-sizing:content]"
       />
+      <PickedFiles files={files} />
       <div className="flex items-center gap-1.5 px-1">
         <div className="scroll-row flex min-w-0 flex-1 items-center gap-1.5">
+          <AttachButton files={files} disabled={stopping} />
           <TaskDevices
             task={task}
             all={devices.data ?? []}
@@ -1228,7 +1258,7 @@ export function TaskComposer({
         <button
           type="button"
           onClick={button.onClick}
-          disabled={busy || !button.onClick}
+          disabled={busy || !button.onClick || (typed && files.pending)}
           aria-label={button.label}
           title={button.label}
           className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-bg disabled:opacity-25 pointer-coarse:h-11 pointer-coarse:w-11"

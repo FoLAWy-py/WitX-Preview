@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
@@ -199,8 +200,8 @@ class Lock(Wire):
 
 
 class LaunchApp(Wire):
-    """Opens an app by its ID, or by ``query`` the best match among the installed apps,
-    found as FindApp finds them: one input instead of a search and then a launch."""
+    """Opens an app by its ID, or by ``query`` the best match among the installed apps
+    (``apps.match`` on the Gateway)."""
 
     kind: Literal["launch_app"] = "launch_app"
     app_id: str | None = Field(
@@ -215,11 +216,16 @@ class LaunchApp(Wire):
         return self
 
 
-class FindApp(Wire):
-    """Searches the apps installed on the device by name. Nothing on the device changes."""
+class ReceiveFile(Wire):
+    """Puts a file the person gave the task on the phone: the WitX app downloads it
+    from ``url`` into its own folder and keeps it only if its SHA-256 is ``sha256``. The
+    agent names ``file_id``; the cloud adds the link and the digest, so a URL never comes
+    from the model."""
 
-    kind: Literal["find_app"] = "find_app"
-    query: str = Field(min_length=1, max_length=100)
+    kind: Literal["receive_file"] = "receive_file"
+    file_id: UUID
+    url: str | None = Field(default=None, max_length=2048, pattern=r"^https?://")
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 ActionInput = Annotated[
@@ -237,7 +243,7 @@ ActionInput = Annotated[
     | VolumeDown
     | Lock
     | LaunchApp
-    | FindApp,
+    | ReceiveFile,
     Field(discriminator="kind"),
 ]
 ActionKind = Literal[
@@ -255,7 +261,7 @@ ActionKind = Literal[
     "volume_down",
     "lock",
     "launch_app",
-    "find_app",
+    "receive_file",
 ]
 
 # Capabilities a device declares. An action kind needs the capability of the same name.

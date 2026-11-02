@@ -13,7 +13,7 @@
 # sessions and gives every device its own local ports. Run `ANDROID_HOME=... ` so it
 # finds adb, and keep Appium on this computer.
 
-cloud_url = "http://127.0.0.1:8000"
+cloud_url = "http://127.0.0.1:47100"
 journal = "witx-gateway.sqlite3"   # beside this file unless absolute; keep it on a local
                                    # disk; the credential is stored under this path
                                    # (moving it means enrolling again)

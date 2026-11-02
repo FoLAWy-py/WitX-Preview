@@ -1,4 +1,4 @@
-"""A person's long-term memory (§8.2, D59): their own entries and what agents kept."""
+"""A person's long-term memory: their own entries and what agents kept."""
 
 from typing import Annotated
 from uuid import UUID

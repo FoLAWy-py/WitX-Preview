@@ -9,18 +9,19 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
 from witx import telemetry
 from witx.config import CatalogModel, Limits
-from witx.domain.model import Step, Task
+from witx.domain import rules
+from witx.domain.model import Device, Run, Step, Task
 from witx.harness import apply, checks, context, prepare, skills, tools
 from witx.harness.compress import Compressor
 from witx.harness.plugins import Installed
-from witx.harness.prompt import INSTRUCTIONS
+from witx.harness.prompt import INSTRUCTIONS, language
 from witx.harness.risk import RiskAssessor
 from witx.harness.skills import Skill
 from witx.harness.turn import Prepared, calls_of
@@ -61,7 +62,7 @@ class Harness:
         self.judge = judge  # None: goals are not judged
         self.compressor = compressor  # None: the history is never summarized
         self.plugins = plugins  # None: no skills
-        # The models a task may fall back to, in order ; without them, none.
+        # The models a task may fall back to, in order; without them, none.
         self.catalog = dict(catalog or {})
         self.default_provider = (
             self.catalog[default_model].provider if default_model in self.catalog else None
@@ -70,6 +71,24 @@ class Harness:
     def skills(self) -> dict[str, Skill]:
         """The skills the agent may load now, from the installed plugins."""
         return self.plugins.skills() if self.plugins else {}
+
+    def tools_for(
+        self, task: Task, run: Run, phones: Sequence[Device], *, files: bool
+    ) -> list[dict[str, Any]]:
+        """The tools a run's model calls are offered (``rules.offered_tools``): its steps'
+        and its side turns' alike, so they share what the provider caches."""
+        offered = rules.offered_tools(
+            (t["name"] for t in tools.TOOLS),
+            tools.INPUT_TOOLS,
+            capabilities={c for d in phones for c in d.capabilities},
+            phones=len(phones),
+            plan_mode=task.plan_mode,
+            sub_agent=run.parent_run_id is not None,
+            can_delegate=run.depth + 1 <= self.limits.max_child_depth,
+            web_search=self.limits.web_search,
+            files=files,
+        )
+        return [t for t in tools.TOOLS if t["name"] in offered]
 
     async def step(self, run_id: UUID, tenant_id: UUID, epoch: int) -> None:
         with telemetry.span("agent.step", tenant_id=tenant_id, run_id=run_id):
@@ -151,7 +170,11 @@ class Harness:
 
     async def _request(self, prepared: Prepared) -> ModelRequest:
         return await self.request_for(
-            prepared.task, prepared.items, prepared.steps, prepared.allowed_providers
+            prepared.task,
+            prepared.items,
+            prepared.steps,
+            prepared.allowed_providers,
+            prepared.tools,
         )
 
     async def request_for(
@@ -160,9 +183,11 @@ class Harness:
         items: list[dict[str, Any]],
         steps: list[Step],
         allowed_providers: tuple[str, ...] | None,
+        offered: list[dict[str, Any]],
     ) -> ModelRequest:
-        """A request on the run's history: the same instructions and tools every time,
-        so the provider's cache of the history's prefix holds (also for side turns)."""
+        """A request on the run's history: the same instructions and tools (``tools_for``)
+        every time, so the provider's cache of the history's prefix holds (also for side
+        turns)."""
 
         async def load(obs_id: UUID) -> bytes:
             async with self.db.tenant(task.tenant_id) as conn:
@@ -173,12 +198,14 @@ class Harness:
         expanded, _ = await context.expand_images(items, load, self.limits.context_images)
         return ModelRequest(
             model=task.model,
-            instructions=INSTRUCTIONS + skills.instructions(self.skills()),
+            instructions=INSTRUCTIONS
+            + skills.instructions(self.skills())
+            + language(task.language),
             input=expanded,
-            tools=tools.TOOLS if self.limits.web_search else tools.TOOLS_WITHOUT_WEB,
+            tools=offered,
             allowed_providers=allowed_providers,
             reasoning_effort=task.reasoning_effort,
-            # Off until the agent turned it on for this task (use_web_search, D27).
+            # Off until the agent turned it on for this task (use_web_search).
             web_search=self.limits.web_search and context.web_search_on(steps),
         )
 

@@ -21,6 +21,7 @@ from witx.api.routes import (
     account,
     actions,
     devices,
+    files,
     gateway,
     memories,
     schedules,
@@ -109,8 +110,11 @@ def create_app(
             "invalid_skill",
             "skill_not_allowed",
             "plugin_not_fit",
+            "unknown_file",
         ):
             status = 422
+        if error.code == "file_too_large":
+            status = 413
         if error.code == "marketplace_unavailable":
             status = 502
         return JSONResponse({"code": error.code, "detail": error.detail}, status_code=status)
@@ -125,6 +129,7 @@ def create_app(
     app.include_router(side_chats.routes(d))
     app.include_router(actions.routes(d))
     app.include_router(memories.routes(d))
+    app.include_router(files.routes(d))
     app.include_router(skills.routes(d, plugins or Installed(plugins_dir())))
     app.include_router(gateway.routes(d))
     app.include_router(workspace.routes(d))

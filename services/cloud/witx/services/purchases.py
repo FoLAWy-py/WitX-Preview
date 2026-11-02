@@ -1,4 +1,4 @@
-"""Purchase intents : in a task with several phones, the agent
+"""Purchase intents: in a task with several phones, the agent
 proposes where to buy and a person chooses. Runs inside the caller's transaction."""
 
 from datetime import datetime

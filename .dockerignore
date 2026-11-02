@@ -1,6 +1,8 @@
 .git
 .env
 .env.*
+**/.env
+deploy/.env
 **/gateway.toml
 **/*.credential
 **/*.pem
@@ -34,3 +36,6 @@ apps/web/dist
 apps/web/test-results
 apps/web/playwright-report
 tests
+apps/ios/WitX.xcodeproj
+apps/ios/**/.build
+apps/ios/**/.swiftpm

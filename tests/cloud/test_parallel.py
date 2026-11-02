@@ -1,4 +1,4 @@
-"""Sub-agents on several devices at once : one delegate call starts them
+"""Sub-agents on several devices at once: one delegate call starts them
 together, each on its own device, and answers with all their results."""
 
 import json

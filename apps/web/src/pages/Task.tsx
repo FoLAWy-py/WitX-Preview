@@ -449,11 +449,13 @@ function TaskView({
   }
 
   // Leaving the page stops waiting to take over: a takeover nobody sees only holds the phone.
-  const left = useRef(false);
+  // The page has gone once the address is another page's, which comes a moment before it
+  // unmounts: a status asked for before leaving can answer "paused" in between.
+  const unmounted = useRef(false);
   useEffect(() => {
-    left.current = false;
+    unmounted.current = false;
     return () => {
-      left.current = true;
+      unmounted.current = true;
     };
   }, []);
 
@@ -463,15 +465,17 @@ function TaskView({
     setError(undefined);
     setTakingOver(deviceId);
     setSheet(false);
+    const here = window.location.pathname;
+    const left = () => unmounted.current || window.location.pathname !== here;
     try {
       let current = task;
       if (current.status === "active") current = await api.pause(task.id);
       for (let i = 0; i < 60 && current.status === "pausing"; i++) {
         await new Promise((r) => setTimeout(r, 500));
-        if (left.current) return;
+        if (left()) return;
         current = await api.task(task.id);
       }
-      if (left.current) return;
+      if (left()) return;
       if (current.status !== "paused")
         throw new Error(t("detail.takeover.failed"));
       setTakeover(await api.takeover(task.id, { device_id: deviceId }));

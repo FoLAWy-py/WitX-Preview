@@ -1,4 +1,4 @@
-"""The log format shared by the cloud and the Gateway ."""
+"""The log format shared by the cloud and the Gateway."""
 
 import io
 import logging

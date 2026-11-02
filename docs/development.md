@@ -22,6 +22,15 @@ CREATE DATABASE witx OWNER witx_owner;
 | `make db-migrate` | 执行编号迁移 |
 | `make dev-api` / `dev-worker` / `dev-web` | 启动服务 |
 | `make dev-gateway GATEWAY_CONFIG=gateway.toml` | 启动 Gateway |
+| `make ios-project` / `make ios-test` | 生成 iPhone App 的 Xcode 工程（需要 xcodegen）/ 运行它的下载规则测试（需要 Xcode）；不在 `make check` 中 |
+
+开发端口避开常用端口，均只监听本机：
+
+| 端口 | 用途 |
+| --- | --- |
+| 47100 | API（`make dev-api`）；Compose 中为 `api:8000`，只对 Nginx 开放 |
+| 47173 | Web 开发服务器（`make dev-web`），把 `/api` 转发到 47100 |
+| 47174 | 浏览器测试使用的 `vite preview`（`WITX_BROWSER_TEST_PORT` 可改） |
 
 每个 API / Worker 终端先运行 `set -a; . ./.env; set +a`。修改前阅读 [AGENTS.md](../AGENTS.md)。
 
@@ -36,7 +45,7 @@ pnpm --filter @witx/web exec playwright install chromium webkit
 make check
 ```
 
-浏览器测试默认启动独立的 Vite 端口 5174。不要让 SOCKS 代理接管本机请求。修改安全机制需要覆盖相应行为的测试。
+浏览器测试先构建 Web，再用 `vite preview` 在 47174 端口打开构建产物。不要让 SOCKS 代理接管本机请求。修改安全机制需要覆盖相应行为的测试。
 
 更新 Web 依赖后运行 `uv run python scripts/third_party_notices.py` 并提交更新后的第三方许可声明；`make check` 会检查它是否匹配已安装依赖。
 
@@ -69,7 +78,30 @@ Compose 提供 PostgreSQL、迁移、API / Hub、Worker 和 Nginx。Web 镜像�
 
 截图和 Plugin 默认在私有卷；可配置 S3 兼容对象存储。API 的 `/health/ready` 检查数据库和对象存储，`witx check` 额外检查模型目录可用性；模型列表可用不保证每次推理成功。日志默认结构化并脱敏，`/metrics` 需要配置 token。扩展 API 实例时，人工接管和 MCP 会话需要粘性路由。
 
-更新已有部署时先备份，并让迁移服务执行新增的编号迁移；任务列表分页使用迁移 `0036_task_list_pages.sql` 中的索引。
+更新已有部署时先备份，并让迁移服务执行新增的编号迁移（本次新增 `0037`–`0041`：等待 UNKNOWN 裁定、任务语言、文件、移除 `find_app`、移除设备）。
+
+Gateway 永久离线、任务卡在停止中时，运行 `witx admin force-stop <任务 ID>`：先列出持有的设备和在途输入，确认后把在途输入记为 UNKNOWN 并释放设备。Devices 页把不再连接的设备排在每个池的最后；没有任务、接管或待裁定输入占用时，Owner 可以移除它，Gateway 再报告它时需要重新启用。
+
+## 文件与 iPhone App
+
+任务可以附文件：每条消息最多 10 个，单个最多 100 MiB。反向代理需要对 `/api/v1/files` 放宽到 `client_max_body_size 101m`，`deploy/nginx-locations.inc` 已包含这项设置。文件和截图一样存放在对象存储中，随任务删除；一天内未附到任务的上传会被清除。
+
+Agent 可以把文件交给 iPhone：Gateway 用签名链接通过 `witx://download` 深链交给 `apps/ios` 里的 WitX App，App 从 `WITX_PUBLIC_URL` 下载、核对 SHA-256，放到“文件 › 我的 iPhone › WitX”。Android 暂不支持接收文件。`project.yml` 是工程唯一来源，构建时设置：
+
+- `WITX_SERVER_ORIGIN`：App 唯一会访问的服务器，必须与云端 `WITX_PUBLIC_URL` 相同，并且手机能访问到（例如局域网 Nginx `http://192.168.1.20:47088`；模拟器可用 `http://127.0.0.1:47088`）。
+- `DEVELOPMENT_TEAM`、`WITX_BUNDLE_SUFFIX`：真机使用与 WebDriverAgent 相同的团队，后缀让 bundle ID（`com.witx.app.<后缀>`）属于你；模拟器不需要团队，后缀默认 `dev`。
+
+```sh
+make ios-project
+# 模拟器
+xcodebuild -project apps/ios/WitX.xcodeproj -scheme WitX -destination 'id=<模拟器 UDID>' \
+  WITX_SERVER_ORIGIN=http://127.0.0.1:47088 build
+# 真机（自动签名）
+xcodebuild -project apps/ios/WitX.xcodeproj -scheme WitX -destination 'id=<UDID>' \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM=<团队 ID> WITX_BUNDLE_SUFFIX=<小写团队 ID> \
+  WITX_SERVER_ORIGIN=http://<Mac 的局域网地址>:47088 build
+xcrun devicectl device install app --device <UDID> <DerivedData>/Build/Products/Debug-iphoneos/WitX.app
+```
 
 ## iOS 文字输入
 
@@ -98,6 +130,8 @@ uv run witx plugin update basics
 也可以显式指定 `basics@witx-preview`。安装展示全文，更新展示差异，确认后才生效；锁文件记录 marketplace、commit 和内容摘要。
 
 如果之前从旧的 `witx` 源安装过 `basics`，请先运行 `uv run witx plugin remove basics`，再运行上面的安装命令，检查并确认新的来源。已有安装的来源不会被静默改写。
+
+CI 把 `make check` 分成并行的 job：lint（含类型检查、构建和插件检查）、Python 测试（带 PostgreSQL）、Web 测试（Chromium 与 WebKit 各一个 job，只在可能影响 Web 的改动时运行），最后由 `check` 汇总。
 
 两个 Preview 仓库的 CI 相互检查：WitX-Preview 检查插件兼容性及内置源名称是否匹配 marketplace；插件仓库使用公开 WitX-Preview main 运行兼容检查。首次配套发布时先推送插件仓库，再推送 WitX-Preview。
 

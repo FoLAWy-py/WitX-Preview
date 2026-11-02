@@ -90,7 +90,7 @@ def _derive(secret: str, purpose: str) -> str:
 
 
 class OidcLogin:
-    """The Web app's sign-in : authorization code + PKCE, run by the backend
+    """The Web app's sign-in: authorization code + PKCE, run by the backend
     as a confidential client.
 
     Nothing is stored while the user is at the provider: a random value travels in a

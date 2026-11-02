@@ -10,7 +10,6 @@ import {
   Play,
   Plus,
   Puzzle,
-  Search,
   Trash2,
 } from "lucide-react";
 import type {
@@ -21,6 +20,7 @@ import type {
 } from "@/api/types.gen";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth";
+import { matchesQuery } from "@/lib/search";
 import { lineDiff } from "@/lib/diff";
 import { cn } from "@/lib/format";
 import type { SkillDraft } from "@/lib/timeline";
@@ -165,9 +165,12 @@ const shortName = (skill: { name: string }) =>
  * person has seen what changes.
  */
 export function Skills({
+  query,
   open,
   onOpen,
 }: {
+  /** What the page's search box holds: only skills that match are listed. */
+  query: string;
   /** The skill being read (plugin:skill). */
   open?: string;
   onOpen: (name?: string) => void;
@@ -176,20 +179,14 @@ export function Skills({
   const { api, me } = useAuth();
   const owner = me?.role === "owner";
   const list = useAsync(() => api.skills(), [api]);
-  const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<Draft>();
   const [reviewing, setReviewing] = useState(false);
   const [history, setHistory] = useState<SkillView>();
   const [deleting, setDeleting] = useState<SkillView>();
 
   const skills = list.data?.skills ?? [];
-  const words = query.trim().toLowerCase();
-  const shown = skills.filter(
-    (s) =>
-      !words ||
-      [s.name, s.description, ...s.apps].some((w) =>
-        w.toLowerCase().includes(words),
-      ),
+  const shown = skills.filter((s) =>
+    matchesQuery(query, [s.name, s.description, ...s.apps]),
   );
   const plugins = [...new Set(shown.map((s) => s.plugin))].sort((a, b) =>
     a === "my" ? -1 : b === "my" ? 1 : a.localeCompare(b),
@@ -271,17 +268,6 @@ export function Skills({
       ) : (
         <div className="md:grid md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-start md:gap-4">
           <Card className={cn("p-2", reading && "hidden md:block")}>
-            <label className="flex h-9 cursor-text items-center gap-2 rounded-lg px-2 text-muted focus-within:bg-selected">
-              <Ico icon={Search} size={15} />
-              <span className="sr-only">{t("skills.search")}</span>
-              <input
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t("skills.search")}
-                className="min-w-0 flex-1 bg-transparent text-[13.5px] text-fg placeholder:text-muted focus:outline-none"
-              />
-            </label>
             {list.data && shown.length === 0 && (
               <p className="px-2 py-3 text-[13px] text-faint">
                 {t("skills.noMatch")}

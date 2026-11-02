@@ -373,3 +373,67 @@ test("the device list refreshes in place: the page stays where the reader scroll
   await expect.poll(() => listed).toBeGreaterThan(before);
   expect(await main.evaluate((el) => el.scrollTop)).toBe(scrolled);
 });
+
+test("a device that is gone is shown apart, after the others, and an owner can remove it", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  let removed = false;
+  const old = {
+    id: "d9",
+    name: "Old iPhone",
+    platform: "ios",
+    online: true,
+    capabilities: ["tap"],
+    task_id: null,
+    pool: "Desk Mac",
+    problems: ["disconnected"],
+    enabled: false,
+    last_seen_at: "2026-10-01T09:00:00Z",
+  };
+  const here = {
+    id: "d1",
+    name: "Pixel 8",
+    platform: "android",
+    online: true,
+    capabilities: ["tap"],
+    task_id: null,
+    pool: "Desk Mac",
+    problems: [],
+    enabled: true,
+  };
+  const deletes: string[] = [];
+  await page.route("**/api/v1/devices", (route) =>
+    route.fulfill({ json: removed ? [here] : [old, here] }),
+  );
+  await page.route("**/api/v1/devices/d9", (route) => {
+    deletes.push(route.request().method());
+    removed = true;
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto("/sign-in");
+  await page.getByLabel("Developer token").fill("dev-token");
+  await page.getByRole("button", { name: "Sign in with token" }).click();
+  await page.goto("/devices");
+
+  const pool = page.getByRole("region", { name: "Desk Mac" });
+  await expect(pool.getByRole("heading", { level: 3 })).toHaveText([
+    "Pixel 8",
+    "Old iPhone",
+  ]);
+  // Only the gone device could show these; it shows when it was last seen instead.
+  await expect(pool.getByText(/last seen/)).toBeVisible();
+  await expect(pool.getByText("What is missing")).toHaveCount(0);
+  await expect(
+    pool.getByRole("button", { name: "Enable for tasks" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Actions for Old iPhone" }).click();
+  await page.getByRole("menuitem", { name: "Remove" }).click();
+  const confirm = page.getByRole("dialog", { name: "Remove Old iPhone?" });
+  await confirm.getByRole("button", { name: "Remove" }).click();
+  await expect.poll(() => deletes).toEqual(["DELETE"]);
+  await expect(page.getByRole("heading", { name: "Old iPhone" })).toHaveCount(
+    0,
+  );
+});

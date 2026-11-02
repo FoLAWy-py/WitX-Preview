@@ -41,7 +41,7 @@ from witx.harness import context
 from witx.models import ModelError, ModelResponse
 from witx.services import execution as exec_service
 from witx.services import lifecycle
-from witx.store import devices, execution, identity, runs, side_turns, tasks
+from witx.store import devices, execution, files, identity, runs, side_turns, tasks
 
 if TYPE_CHECKING:
     from witx.harness.loop import Harness
@@ -126,10 +126,14 @@ async def _take(harness: "Harness", tenant_id: UUID, turn: SideTurn) -> None:
         ]
         text = await _prompt(conn, task, main, turn, asker, steps[-1].input_seq if steps else 0)
         chosen = await identity.allowed_providers(conn, task.tenant_id)
+        phones = [d for d in await devices.list_all(conn) if d.id in main.device_ids]
+        given = bool(await files.of_task(conn, task.id))
     added = context.side_turn(steps, calls, text)
     items = context.history(steps, summary, unknown) + added
     allowed = None if chosen is None else tuple(chosen)
-    request = await harness.request_for(task, items, steps, allowed)
+    request = await harness.request_for(
+        task, items, steps, allowed, harness.tools_for(task, main, phones, files=given)
+    )
     kept: dict[str, Any] = {"model": task.model, "history_steps": len(steps), "input": added}
     try:
         response = await harness.model.respond(request)

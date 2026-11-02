@@ -10,7 +10,7 @@ to the request that answers it.
 
 import base64
 import json
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -30,6 +30,7 @@ from witx.domain.model import (
     RunSummary,
     Step,
     Task,
+    TaskFile,
     ToolCall,
 )
 from witx.domain.rules import Rejected
@@ -51,7 +52,7 @@ class RunContext:
     earlier: Sequence[tuple[datetime, str]] = ()
     # The screenshots taken of the run's devices as it started.
     first_screens: Sequence[Observation] = ()
-    # What is kept for the person who started the task (§8.2, D59): their preferences
+    # What is kept for the person who started the task: their preferences
     # and corrections, for the main agent's first turn; and notes about apps, given the
     # first time a screenshot shows that app.
     memories: Sequence[Memory] = ()
@@ -64,6 +65,20 @@ class RunContext:
     # the agent wrote with it. A run that starts after the task finished knows only its
     # answers otherwise, not how it got there.
     done: Sequence[tuple[Action, str | None]] = ()
+    # The files the user gave the task, in the order given.
+    files: Sequence[TaskFile] = ()
+
+
+FILES_PREFIX = (
+    "Files the user gave this task. You cannot read them; they are for the user's phone, "
+    "where the user wants them:"
+)
+
+
+def _file_lines(files: Iterable[TaskFile]) -> list[str]:
+    return [
+        f"- {f.name} ({rules.byte_size(f.size)}, {f.content_type}), file_id {f.id}" for f in files
+    ]
 
 
 def _user(*content: dict[str, Any]) -> dict[str, Any]:
@@ -317,6 +332,8 @@ def _intro(ctx: RunContext) -> str:
                 "Messages from the user, oldest first. They are the conversation: handle any "
                 "request in them, the newest above all, now:\n" + "\n".join(f"- {n}" for n in notes)
             )
+    if ctx.files:
+        parts.append(FILES_PREFIX + "\n" + "\n".join(_file_lines(ctx.files)))
     told = [i["text"] for i in _mine(ctx) if i["kind"] == "agent"]
     if told:
         parts.append(AGENT_PREFIX + "\n" + "\n".join(f"- {t}" for t in told))
@@ -547,6 +564,11 @@ def new_items(ctx: RunContext) -> tuple[list[dict[str, Any]], int]:
             f"- [{'note' if i['kind'] == 'system' else i['kind']}] {_as_read(i['text'])}"
             for i in updates
         ]
+        sent = {int(i["seq"]) for i in updates}
+        added = [f for f in ctx.files if f.input_seq in sent]
+        if added:
+            lines += ["", FILES_PREFIX.replace("this task", "with these messages")]
+            lines += _file_lines(added)
         items.append(_user(_text(UPDATE_PREFIX + "\n" + "\n".join(lines))))
     return items, latest_seq
 

@@ -34,7 +34,7 @@ def routes(d: Deps) -> APIRouter:
 
     @router.post("/gateway/v1/enroll", response_model=wire.Credential)
     async def enroll(body: wire.Enrollment) -> wire.Credential:
-        """A new Gateway spends its one-time code for its first credential ."""
+        """A new Gateway spends its one-time code for its first credential."""
         gateway_id, credential = await identity.enroll_gateway(
             d.db, code=body.code, host=body.host, now=datetime.now(UTC)
         )

@@ -4,7 +4,7 @@ A goal is a condition to be met. When the agent finishes, or ends a turn with wo
 no tool call, a separate model call judges it from the user's request, the goal, the
 agent's words and the newest screenshots, with no history: "met", "not_met" (with what
 is missing, for the agent) or "impossible". Only a task with a goal is judged; the
-agent's answer itself is not checked (D37 is gone: like Codex, the answer the model
+agent's answer itself is not checked (like Codex, the answer the model
 streams is final).
 
 A judgement that cannot be had (timeout, refusal, malformed answer) never blocks the

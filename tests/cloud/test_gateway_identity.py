@@ -1,4 +1,4 @@
-"""A Gateway's machine identity : one-time enrollment, rotation, disabling and
+"""A Gateway's machine identity: one-time enrollment, rotation, disabling and
 revocation."""
 
 import asyncio

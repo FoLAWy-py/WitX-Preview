@@ -43,7 +43,7 @@ CREATE TABLE memberships (
 
 -- ------------------------------------------------------------------ devices
 
--- A Gateway's machine identity . It enrolls once with a one-time code,
+-- A Gateway's machine identity. It enrolls once with a one-time code,
 -- then holds a credential it rotates itself: a rotation issues the next credential,
 -- which replaces the current one the first time it is used. Revoked is for good;
 -- disabled can be undone. Only SHA-256 hashes are stored.
@@ -85,7 +85,7 @@ CREATE TABLE devices (
   FOREIGN KEY (tenant_id, gateway_id) REFERENCES gateways (tenant_id, id)
 );
 
--- Who enabled or disabled a device, and when (device pool, #33).
+-- Who enabled or disabled a device, and when (device pool).
 CREATE TABLE device_changes (
   id          uuid PRIMARY KEY,
   tenant_id   uuid NOT NULL,
@@ -117,7 +117,7 @@ CREATE TABLE tasks (
   event_seq         bigint NOT NULL DEFAULT 0,    -- stream head for `events`
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
-  -- Deletion : the tombstone hides the task at once; the purge then removes
+  -- Deletion: the tombstone hides the task at once; the purge then removes
   -- its content and screenshots, keeping only `audit` until the audit retention ends.
   deleted_at        timestamptz,
   deleted_by        uuid REFERENCES users (id),
@@ -219,7 +219,7 @@ CREATE TABLE device_leases (
   epoch              bigint NOT NULL,
   stop_id            uuid,                     -- set while a stop barrier is pending
   stop_requested_at  timestamptz,
-  -- A person controlling the device  under this lease's epoch, until the
+  -- A person controlling the device under this lease's epoch, until the
   -- expiry, which each of their inputs extends. A new epoch ends the takeover.
   takeover_id          uuid,
   takeover_user        uuid REFERENCES users (id),
@@ -279,7 +279,7 @@ CREATE TABLE actions (
   reconciled_by        uuid REFERENCES users (id),
   reconciled_with      uuid REFERENCES observations (id),
   retry_of             uuid REFERENCES actions (id), -- the action a person confirmed had no effect,
-                                                    -- which this one tries again 
+                                                    -- which this one tries again
   created_at           timestamptz NOT NULL DEFAULT now(),
   sent_at              timestamptz,
   finished_at          timestamptz,
@@ -316,7 +316,7 @@ CREATE TABLE events (
   FOREIGN KEY (tenant_id, task_id) REFERENCES tasks (tenant_id, id)
 );
 
--- A browser's sign-in . The cookie holds a random token; only its hash is
+-- A browser's sign-in. The cookie holds a random token; only its hash is
 -- stored. Not tenant-scoped: the tenant is chosen per request, and membership is
 -- checked on every request, so removing a member takes effect at once.
 CREATE TABLE sessions (

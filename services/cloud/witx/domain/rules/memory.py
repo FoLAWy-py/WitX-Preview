@@ -1,4 +1,4 @@
-"""What the agent keeps beyond a task: long-term memory (§8.2) and the person's own skills."""
+"""What the agent keeps beyond a task: long-term memory and the person's own skills."""
 
 import re
 from collections.abc import Collection, Iterable

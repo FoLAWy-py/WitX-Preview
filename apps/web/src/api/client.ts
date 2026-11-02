@@ -17,6 +17,7 @@ import type {
   PurchaseChoice,
   PurchaseView,
   EventView,
+  FileView,
   Me,
   ModelUpdate,
   LiveFrame,
@@ -228,6 +229,10 @@ export class Api {
     this.post<GatewayView>(`/api/v1/gateways/${id}/${change}`, {});
   enableDevice = (id: string, body: DeviceEnable) =>
     this.post<DeviceView>(`/api/v1/devices/${id}/enable`, body);
+  /** A device that is gone: no longer listed, and disabled. */
+  removeDevice = async (id: string) => {
+    await this.request(`/api/v1/devices/${id}`, { method: "DELETE" });
+  };
   disableDevice = (id: string) =>
     this.post<DeviceView>(`/api/v1/devices/${id}/disable`, {});
   deviceChanges = (id: string) =>
@@ -306,6 +311,15 @@ export class Api {
     this.post<TaskDetail>("/api/v1/tasks", body);
   addInput = (id: string, body: TaskInputCreate) =>
     this.post<TaskDetail>(`/api/v1/tasks/${id}/inputs`, body);
+  /** A file to send with a message: the person's own until it is sent. */
+  uploadFile = async (file: File) =>
+    (await (
+      await this.request(
+        `/api/v1/files?name=${encodeURIComponent(file.name)}`,
+        { method: "POST", body: file },
+        { "Content-Type": file.type || "application/octet-stream" },
+      )
+    ).json()) as FileView;
   /** Withdraws one's own message while the main agent has not read it. */
   withdrawInput = async (id: string, seq: number) =>
     (await (

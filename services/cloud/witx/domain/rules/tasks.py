@@ -1,5 +1,6 @@
 """Tasks: titles, groups, deletion, and a long task's page in parts."""
 
+import re
 from bisect import bisect_left
 from collections.abc import Sequence
 from datetime import datetime
@@ -54,6 +55,13 @@ def check_task_deletable(
         )
 
 
+def check_force_stop(status: TaskStatus) -> None:
+    """Only a stop already asked for can be forced: the task stops as ever, and only
+    the Gateway's confirmation of the barrier is waived."""
+    if status != TaskStatus.STOPPING:
+        raise Rejected("not_stopping", "only a task that is stopping can be forced to stop")
+
+
 GROUP_NAME_MAX = 80
 
 
@@ -82,3 +90,15 @@ def task_title(text: str) -> str | None:
     line = " ".join(text.split())
     line = line.strip(_TITLE_QUOTES).rstrip(_TITLE_ENDINGS).strip(_TITLE_QUOTES)
     return line[:TITLE_MAX] or None
+
+
+# The name of a language, as the title model gives it with the title: "English",
+# "Simplified Chinese", "Brazilian Portuguese".
+_LANGUAGE = re.compile(r"[A-Za-z][A-Za-z ()-]{1,38}[A-Za-z)]")
+
+
+def task_language(text: str) -> str | None:
+    """The language a task's first message is written in, as named in English; None
+    for anything that is not plainly such a name, so it is never text to follow."""
+    name = " ".join(text.split())
+    return name if _LANGUAGE.fullmatch(name) else None

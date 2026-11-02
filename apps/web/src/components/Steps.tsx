@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   AppWindow,
   ArrowLeft,
+  Download,
   BookOpen,
   ArrowUpDown,
   ChevronRight,
@@ -49,16 +50,12 @@ export const kindIcon: Record<ActionView["kind"], LucideIcon> = {
   volume_down: Volume1,
   lock: Lock,
   launch_app: AppWindow,
-  find_app: Search,
+  receive_file: Download,
 };
 
 /** Steps whose screenshot after says nothing: opening an app only brings it to the
- * front, and searching the installed apps leaves the screen as it was. The agent still
- * gets that screenshot; the timeline does not show it. */
-const WITHOUT_SHOT: ReadonlySet<ActionView["kind"]> = new Set([
-  "launch_app",
-  "find_app",
-]);
+ * front. The agent still gets that screenshot; the timeline does not show it. */
+const WITHOUT_SHOT: ReadonlySet<ActionView["kind"]> = new Set(["launch_app"]);
 
 /** What an input did, in words: the target, or the text typed, or the app opened. */
 export function stepText(action: ActionView): string {
@@ -69,8 +66,6 @@ export function stepText(action: ActionView): string {
     const app = input.app_id ?? input.query; // by query: the best match opened
     if (typeof app === "string") return action.target || app;
   }
-  if (action.kind === "find_app" && typeof input.query === "string")
-    return `“${input.query}”`;
   if (action.kind === "select_option" && typeof input.value === "string")
     return `“${input.value}”`;
   return action.target;

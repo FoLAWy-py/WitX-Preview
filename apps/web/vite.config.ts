@@ -3,15 +3,15 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 
-// In development the API runs on :8000 (`make dev-api`); requests are proxied to it.
-const api = process.env.WITX_API_URL ?? "http://127.0.0.1:8000";
+// In development the API runs on :47100 (`make dev-api`); requests are proxied to it.
+const api = process.env.WITX_API_URL ?? "http://127.0.0.1:47100";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   server: {
     host: "127.0.0.1",
-    port: 5173,
+    port: 47173,
     strictPort: true,
     // `ws`: the takeover socket (/api/v1/takeovers/{id}/connect) goes through too.
     proxy: { "/api": { target: api, ws: true } },

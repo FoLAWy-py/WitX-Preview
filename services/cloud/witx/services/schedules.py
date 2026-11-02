@@ -1,5 +1,5 @@
-"""Scheduled tasks: a task that starts by itself, once or repeatedly, at a local time. At its
-    moment the worker starts the task as the person who made the
+"""Scheduled tasks: a task that starts by itself, once or repeatedly, at a local time.
+At its moment the worker starts the task as the person who made the
 schedule, with the same checks as starting it by hand. A phone that is busy or not ready
 is waited for up to SCHEDULE_GRACE; after that the run is skipped and the reason kept."""
 

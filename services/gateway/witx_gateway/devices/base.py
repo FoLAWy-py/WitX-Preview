@@ -127,8 +127,8 @@ class Device(Protocol):
     def settles_on_its_own(self) -> bool:
         """Whether the driver answers an input only once the app has settled (UiAutomator2
         waits up to 3 s for it to idle). One that answers at once (XCUITest, whose own
-        wait of up to 2 s left WebDriverAgent hanging for 30 s on an app that never idles,
-        D64) gets the screenshot after every input taken once the screen rests."""
+        wait of up to 2 s left WebDriverAgent hanging for 30 s on an app that never idles)
+        gets the screenshot after every input taken once the screen rests."""
         ...
 
     @property
@@ -259,6 +259,11 @@ class Device(Protocol):
         ...
 
     async def launch_app(self, app_id: str) -> None: ...
+
+    async def open_link(self, url: str, app_id: str) -> None:
+        """Hands the link ``url`` to the app ``app_id`` itself, which opens with it: no
+        "Open in …?" prompt, as the system shows for a link opened any other way."""
+        ...
 
     async def list_apps(self) -> dict[str, str | None]:
         """The installed apps: ID to display name (None where the platform has none)."""

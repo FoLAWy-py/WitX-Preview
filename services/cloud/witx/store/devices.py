@@ -1,18 +1,19 @@
 """Gateways, devices and device leases."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from witx.domain import rules
 from witx.domain.model import Device, Lease
 from witx.store import notices
 from witx.store.db import execute, fetch, fetch_one
 
 _DEVICE = """id, tenant_id, gateway_id, native_id, platform, name, capabilities, online, epoch,
-             sensitive_apps, problems, enabled_at"""
+             sensitive_apps, problems, enabled_at, last_seen_at"""
 
 
 def _device(row: RowMapping) -> Device:
@@ -29,6 +30,7 @@ def _device(row: RowMapping) -> Device:
         sensitive_apps=list(row["sensitive_apps"]),
         problems=list(row["problems"]),
         enabled=row["enabled_at"] is not None,
+        last_seen_at=row["last_seen_at"],
     )
 
 
@@ -164,8 +166,12 @@ async def credential_issued_at(conn: AsyncConnection, gateway_id: UUID) -> datet
 
 
 async def device_counts(conn: AsyncConnection) -> dict[UUID, int]:
-    """How many devices each Gateway has reported."""
-    rows = await fetch(conn, "SELECT gateway_id, count(*) AS n FROM devices GROUP BY gateway_id")
+    """How many devices each Gateway has reported, not counting those removed."""
+    rows = await fetch(
+        conn,
+        """SELECT gateway_id, count(*) AS n FROM devices
+            WHERE removed_at IS NULL GROUP BY gateway_id""",
+    )
     return {r["gateway_id"]: int(r["n"]) for r in rows}
 
 
@@ -188,10 +194,11 @@ async def sync_gateway_devices(
 ) -> list[Device]:
     """Registers what a Gateway reports, on connecting and whenever a device changes.
     Devices it no longer lists go offline. ``problems`` say why a device cannot take tasks
-    (device pool, #33). A new device waits for an owner to enable it; once enabled, it
-    keeps the name the owner gave it."""
-    await execute(conn, "UPDATE gateways SET last_seen_at = now() WHERE id = :g", g=gateway_id)
-    await execute(conn, "UPDATE devices SET online = false WHERE gateway_id = :g", g=gateway_id)
+    (device pool). A new device waits for an owner to enable it; once enabled, it
+    keeps the name the owner gave it. A removed device it reports connected comes
+    back, waiting to be enabled again."""
+    await touch_gateway(conn, gateway_id)
+    await execute(conn, f"UPDATE devices SET {_OFFLINE} WHERE gateway_id = :g", g=gateway_id)
     result = []
     for d in devices:
         row = await fetch_one(
@@ -208,7 +215,8 @@ async def sync_gateway_devices(
                        capabilities = EXCLUDED.capabilities,
                        sensitive_apps = EXCLUDED.sensitive_apps,
                        problems = EXCLUDED.problems,
-                       online = true, last_seen_at = now()
+                       online = true, last_seen_at = now(),
+                       removed_at = CASE WHEN :back THEN NULL ELSE devices.removed_at END
                 RETURNING {_DEVICE}""",
             id=uuid4(),
             t=tenant_id,
@@ -219,6 +227,7 @@ async def sync_gateway_devices(
             caps=d["capabilities"],
             sensitive=d.get("sensitive_apps", []),
             problems=d.get("problems", []),
+            back=rules.comes_back(cast("list[str]", d.get("problems", []))),
         )
         assert row is not None
         result.append(_device(row))
@@ -226,22 +235,51 @@ async def sync_gateway_devices(
     return result
 
 
+# A device going offline was last seen now: "last seen" on its card is when it went away.
+_OFFLINE = "online = false, last_seen_at = CASE WHEN online THEN now() ELSE last_seen_at END"
+
+
+async def touch_gateway(conn: AsyncConnection, gateway_id: UUID) -> None:
+    """The Gateway is connected now (its API process says so every GATEWAY_HEARTBEAT)."""
+    await execute(conn, "UPDATE gateways SET last_seen_at = now() WHERE id = :g", g=gateway_id)
+
+
 async def set_gateway_offline(conn: AsyncConnection, gateway_id: UUID) -> list[UUID]:
     rows = await fetch(
         conn,
-        "UPDATE devices SET online = false WHERE gateway_id = :g RETURNING id",
+        f"UPDATE devices SET {_OFFLINE} WHERE gateway_id = :g AND online RETURNING id",
         g=gateway_id,
     )
     await notices.notify(conn, "devices")
     return [r["id"] for r in rows]
 
 
+async def set_silent_gateways_offline(conn: AsyncConnection, silent_since: datetime) -> int:
+    """Takes offline the devices of the Gateways not heard from since ``silent_since``:
+    their API process went away without marking them offline. Each was last seen
+    when its Gateway was."""
+    rows = await fetch(
+        conn,
+        """UPDATE devices d SET online = false, last_seen_at = g.last_seen_at
+             FROM gateways g
+            WHERE g.id = d.gateway_id AND d.online
+              AND (g.last_seen_at IS NULL OR g.last_seen_at < :since)
+           RETURNING d.id""",
+        since=silent_since,
+    )
+    if rows:
+        await notices.notify(conn, "devices")
+    return len(rows)
+
+
 async def list_all(conn: AsyncConnection) -> list[Device]:
-    """The tenant's devices, except those of revoked Gateways (they cannot come back)."""
+    """The tenant's devices, except those of revoked Gateways (they cannot come back) and
+    those an owner removed."""
     rows = await fetch(
         conn,
         f"""SELECT {_DEVICE} FROM devices
              WHERE gateway_id NOT IN (SELECT id FROM gateways WHERE revoked_at IS NOT NULL)
+               AND removed_at IS NULL
              ORDER BY name""",
     )
     return [_device(r) for r in rows]
@@ -463,6 +501,25 @@ async def set_enabled(
     )
     await record_change(conn, device_id, user_id, "enabled" if enabled else "disabled", name)
     await notices.notify(conn, "devices")
+
+
+async def remove(conn: AsyncConnection, device_id: UUID, *, user_id: UUID | None) -> None:
+    """Disables a device and leaves it out of the list; its row stays for the
+    tasks that used it. Its Gateway reporting it again brings it back."""
+    row = await fetch_one(
+        conn,
+        """UPDATE devices SET removed_at = now(), enabled_at = NULL, enabled_by = NULL
+            WHERE id = :d RETURNING name""",
+        d=device_id,
+    )
+    if row is not None:
+        await record_change(conn, device_id, user_id, "removed", row["name"])
+    await notices.notify(conn, "devices")
+
+
+async def removed(conn: AsyncConnection, device_id: UUID) -> bool:
+    row = await fetch_one(conn, "SELECT removed_at FROM devices WHERE id = :d", d=device_id)
+    return row is not None and row["removed_at"] is not None
 
 
 async def record_change(

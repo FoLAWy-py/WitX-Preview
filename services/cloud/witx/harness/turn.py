@@ -49,6 +49,7 @@ class Prepared:
     step_id: UUID
     items: list[dict[str, Any]]  # with screenshot placeholders
     allowed_providers: tuple[str, ...] | None  # the tenant's choice (see ModelRequest)
+    tools: list[dict[str, Any]]  # what the run is offered (Harness.tools_for)
     # For context compression: the steps so far, what this step adds, the summary
     # in use, the last attempt at one, the last step's input size, and unknown inputs.
     steps: list[Step] = field(default_factory=list)

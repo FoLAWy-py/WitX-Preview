@@ -1,4 +1,4 @@
-"""Purchase intents : where the agent proposes to buy, and the person's choice."""
+"""Purchase intents: where the agent proposes to buy, and the person's choice."""
 
 from collections.abc import Mapping
 from datetime import datetime

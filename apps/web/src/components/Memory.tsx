@@ -20,7 +20,7 @@ export function memoryKind(
 }
 
 /**
- * Something the agent kept for the person's future tasks on its own (D59, after Claude
+ * Something the agent kept for the person's future tasks on its own (after Claude
  * Code's auto memory): one line in the conversation, undone with one click.
  */
 export function MemoryCard({

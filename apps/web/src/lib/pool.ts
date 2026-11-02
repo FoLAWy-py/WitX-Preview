@@ -66,3 +66,13 @@ export function byPool(devices: DeviceView[]): [string, DeviceView[]][] {
   }
   return [...pools.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
+
+/** A device its Gateway does not have connected: shown apart, and removable. */
+export const gone = (device: DeviceView): boolean =>
+  !device.online || device.problems.includes("disconnected");
+
+/** A pool's devices with the ones that are gone after the rest, in order otherwise. */
+export const goneLast = (devices: DeviceView[]): DeviceView[] => [
+  ...devices.filter((d) => !gone(d)),
+  ...devices.filter(gone),
+];

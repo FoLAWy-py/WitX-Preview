@@ -7,7 +7,7 @@ Delivery is at-least-once in both directions. Receivers deduplicate by the IDs i
 the messages (``observation_id``, ``action_id``, ``stop_id``); a repeated message
 never repeats device input.
 
-A person taking over a device  uses a live request/response pair on the
+A person taking over a device uses a live request/response pair on the
 same socket: ``FrameRequest``/``Frame`` for the live picture (a JPEG inline, never
 stored) and ``ManualInput``/``ManualInputResult`` for their input. These are not
 resent after a reconnect; the takeover simply ends.
@@ -38,7 +38,7 @@ class DeviceInfo(Wire):
     # Apps in which every input counts as sensitive (payments, banking, messaging).
     sensitive_apps: list[str] = Field(default_factory=list, max_length=64)
     capabilities: list[Capability]
-    # Empty when the device can take tasks (device pool, #33).
+    # Empty when the device can take tasks (device pool).
     problems: list[Problem] = Field(default_factory=list, max_length=16)
 
 
@@ -118,7 +118,8 @@ class ActionResult(Wire):
     outcome: Literal["rejected", "returned", "unknown"]
     reason: str | None = Field(default=None, max_length=64)
     finished_at: datetime
-    # find_app only: the installed apps that match, best first (empty: none matches).
+    # launch_app by query only: the installed apps that match, best first, the opened one
+    # first.
     apps: list[FoundApp] | None = Field(default=None, max_length=5)
     # type_text: what the focused field holds once the text is in, so a lost
     # or changed character is caught at once. None when it cannot be read: no field, a

@@ -1,5 +1,5 @@
 """Who is calling: maps an authenticated subject to a user and one tenant, and a
-Gateway's machine credential to its Gateway ."""
+Gateway's machine credential to its Gateway."""
 
 import hashlib
 import secrets
@@ -59,7 +59,7 @@ async def set_fast_risk_check(conn: AsyncConnection, actor: Actor, on: bool) -> 
 
 
 async def set_model_fallback(conn: AsyncConnection, actor: Actor, on: bool) -> None:
-    """Only a tenant owner lets tasks switch models on their own ."""
+    """Only a tenant owner lets tasks switch models on their own."""
     if actor.role != "owner":
         raise Rejected("owner_required", "only a tenant owner can change this")
     await identity.set_model_fallback(conn, actor.tenant_id, on)

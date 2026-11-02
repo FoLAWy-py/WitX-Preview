@@ -6,8 +6,70 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A newer push to the same pull request makes the older run moot.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  check:
+  # Whether the web app could be affected: its code, the contracts it is typed from, the
+  # lockfile and CI itself. Every push to main runs everything.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.diff.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "origin/$BASE...HEAD")
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(apps/web/|packages/contracts/|pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml|Makefile|\.github/)'; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: make setup
+      - run: make lint typecheck build
+      # The public Preview plugins must still fit this build: a renamed or removed tool
+      # or effect shows here, naming the skills to change in witx-plugins-preview.
+      - name: Check Preview plugin compatibility
+        run: |
+          git clone --depth 1 https://github.com/FoLAWy-py/witx-plugins-preview.git "$RUNNER_TEMP/witx-plugins-preview"
+          uv run --locked witx plugin check "$RUNNER_TEMP/witx-plugins-preview"
+          uv run --locked python - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          from witx.harness.plugins import OFFICIAL
+
+          manifest = Path(os.environ["RUNNER_TEMP"]) / "witx-plugins-preview/.witx-plugin/marketplace.json"
+          assert json.loads(manifest.read_text())["name"] == OFFICIAL, "Preview marketplace name differs from the built-in source"
+          PYTHON
+
+  python:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -23,24 +85,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: make test-python
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: make setup
-      - run: pnpm --filter @witx/web exec playwright install --with-deps chromium webkit
-      - run: make check
-      - name: Check Preview plugin compatibility
-        run: |
-          git clone --depth 1 https://github.com/FoLAWy-py/witx-plugins-preview.git "$RUNNER_TEMP/witx-plugins-preview"
-          uv run --locked witx plugin check "$RUNNER_TEMP/witx-plugins-preview"
-          uv run --locked python - <<'PYTHON'
-          import json
-          import os
-          from pathlib import Path
-          from witx.harness.plugins import OFFICIAL
+      - run: pnpm install --frozen-lockfile
+      - id: playwright
+        run: echo "version=$(pnpm --filter @witx/web exec playwright --version)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ matrix.browser }}-${{ steps.playwright.outputs.version }}
+      - run: pnpm --filter @witx/web exec playwright install --with-deps ${{ matrix.browser }}
+      - if: matrix.browser == 'chromium'
+        run: pnpm test:web
+      # Two workers on the runner's two cores (one by default): the tests mostly wait.
+      - run: pnpm --filter @witx/web exec playwright test --project=${{ matrix.browser }} --workers=2
 
-          manifest = Path(os.environ["RUNNER_TEMP"]) / "witx-plugins-preview/.witx-plugin/marketplace.json"
-          assert json.loads(manifest.read_text())["name"] == OFFICIAL, "Preview marketplace name differs from the built-in source"
-          PYTHON
+  # The one check branch protection asks for: every job passed, or was not needed.
+  check:
+    if: always()
+    needs: [changes, lint, python, web]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: >-
+            ${{ needs.changes.result }} ${{ needs.lint.result }}
+            ${{ needs.python.result }} ${{ needs.web.result }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in success|skipped) ;; *) echo "a job ended: $result"; exit 1;; esac
+          done

@@ -1,4 +1,4 @@
-"""`witx admin recover`: make a database restored from a backup safe to run .
+"""`witx admin recover`: make a database restored from a backup safe to run.
 
 1. Replay the restore ledger (``services.ledger``): tasks deleted after the backup are
    deleted again; Gateways and devices get the state they last had, so nothing revoked
@@ -43,7 +43,13 @@ async def recover(db: Database, objects: ObjectStore, now: datetime) -> dict[str
                 replayed["gateways"] += 1
             elif kind == "device":
                 current_device = await recovery.device_state(conn, entity)
-                if current_device is None or current_device["enabled"] == state["enabled"]:
+                if current_device is None:
+                    continue
+                if state.get("removed") and not await devices.removed(conn, entity):
+                    await devices.remove(conn, entity, user_id=by)
+                    replayed["devices"] += 1
+                    continue
+                if current_device["enabled"] == state["enabled"]:
                     continue
                 await devices.set_enabled(
                     conn, entity, user_id=by, enabled=state["enabled"], name=state["name"]

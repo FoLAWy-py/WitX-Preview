@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import type {
   DeviceView,
   RunView,
@@ -7,12 +7,14 @@ import type {
 } from "@/api/types.gen";
 import { useI18n, type Translate } from "@/i18n";
 import { useAuth } from "@/lib/auth";
-import { cn, duration } from "@/lib/format";
+import { clock, cn, dayMoment, duration, exactTime } from "@/lib/format";
 import { kindKey } from "@/lib/effects";
 import {
   blocks,
+  blockTime,
   openQuestions,
   stopReason,
+  timeBreaks,
   type TimelineItem,
 } from "@/lib/timeline";
 import { agentName, nameDevices, runLabel } from "@/lib/agents";
@@ -26,11 +28,13 @@ import { ProposalCard } from "./Schedule";
 import { PurchaseCard } from "./Purchase";
 import { MemoryCard } from "./Memory";
 import { MessageActions } from "./MessageActions";
+import { filesOf } from "@/lib/files";
 import { sayingOf } from "@/lib/saying";
 import { advance } from "@/lib/typewriter";
 import { Round } from "./Steps";
 import { UnknownCard, ApprovalRecord } from "./Cards";
 import { Evidence } from "./Evidence";
+import { SentFiles } from "./Attachments";
 
 /** Whether an agent of the task is waiting for the person to answer its question. */
 export function awaitingAnswer(task: TaskDetail): boolean {
@@ -54,7 +58,7 @@ export function mainAsks(task: TaskDetail): boolean {
  * looking at a screen, or what its step is at: writing, planning the next
  * input, having its risk assessed, having its summary checked, working on after the
  * check refused the summary, or just thinking; thinking after it searched the web or
- * loaded a skill, that (`notice`, D73). */
+ * loaded a skill, that (`notice`). */
 function activity(
   task: TaskDetail,
   run: RunView | undefined,
@@ -208,7 +212,7 @@ export function Conversation({
   /** Only this agent's part of the task (its tab in the side panel). */
   scope?: RunView;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { me } = useAuth();
   // Scoped to one agent (its tab in the side panel), "live" and "what it does now" are
   // that agent's; otherwise the task's and its main agent's.
@@ -227,9 +231,11 @@ export function Conversation({
   // Waiting for your answer: the agent shown (a sub-agent's question has its card).
   const asking =
     root?.status === "waiting" && root.wait_reason === "user_input";
-  // Waiting for an approval: the card above says so, with what to decide.
+  // Waiting for an approval, or for your ruling on an input whose effect is unknown:
+  // the card above says so, with what to decide.
   const approving =
-    root?.status === "waiting" && root.wait_reason === "approval";
+    root?.status === "waiting" &&
+    (root.wait_reason === "approval" || root.wait_reason === "unknown");
   // The questions still waiting for an answer, one per agent, answered one at a time
   // (the oldest first); in an agent's tab, its own.
   const queue = openQuestions(task, items);
@@ -257,379 +263,419 @@ export function Conversation({
   const newest = last?.kind === "round" ? last.items.at(-1) : undefined;
   const notice =
     newest?.kind === "status" ? t(newest.message, newest.vars) : undefined;
+  // The time, said before the first block and after a pause or a new day.
+  const breaks = timeBreaks(list.map(blockTime));
+  // A message's own time, shown when it is pointed at or focused, in full as its tip.
+  const said = (at: string) => (
+    <time
+      dateTime={at}
+      title={exactTime(at, locale)}
+      className="text-[11.5px] text-faint tabular-nums opacity-0 transition-opacity group-focus-within/msg:opacity-100 group-hover/msg:opacity-100"
+    >
+      {clock(at, locale).slice(0, 5)}
+    </time>
+  );
   return (
     <ol aria-label={t("conversation.label")} className="space-y-5">
-      {list.map((block, index) => {
-        if (block.kind === "round") {
-          return (
-            <li
-              key={block.key}
-              id={`item-${block.key}`}
-              className="anim-slide scroll-mt-4"
-            >
-              <Round
-                task={task}
-                items={block.items}
-                devices={devices}
-                live={
-                  inRound && index === list.length - 1 ? (
-                    <Working
-                      task={task}
-                      run={root}
-                      devices={devices}
-                      saying={saying}
-                      notice={notice}
-                    />
-                  ) : undefined
-                }
-              />
+      {list.map((block, index) => (
+        <Fragment key={block.kind === "round" ? block.key : block.item.key}>
+          {breaks[index] && (
+            <li className="text-center text-[12px] text-faint">
+              <time
+                dateTime={blockTime(block)}
+                title={exactTime(blockTime(block), locale)}
+              >
+                {dayMoment(blockTime(block), locale, t)}
+              </time>
             </li>
-          );
-        }
-        const item = block.item;
-        switch (item.kind) {
-          case "input":
-            return (
-              <li
-                key={item.key}
-                id={`item-${item.key}`}
-                className="group/msg anim-slide flex scroll-mt-4 flex-col items-end"
-              >
-                <div className="max-w-[85%] rounded-2xl rounded-br-md bg-fill px-4 py-2.5 text-[15px] leading-relaxed">
-                  {item.input.kind === "constraint" && (
-                    <div className="mb-0.5 text-[12px] font-medium text-accent">
-                      {t("timeline.constraint")}
-                    </div>
-                  )}
-                  {subAgent(item.input.run_id ?? undefined) && (
-                    <div className="mb-0.5 text-[12px] font-medium text-muted">
-                      {t("timeline.replyTo", {
-                        name: subAgent(item.input.run_id ?? undefined)!,
-                      })}
-                    </div>
-                  )}
-                  <span className="whitespace-pre-wrap break-words">
-                    {item.input.text}
-                  </span>
-                </div>
-                <MessageActions
-                  task={task}
-                  input={item.input}
-                  onEdit={onEdit}
-                  onChange={onChange}
-                />
-              </li>
-            );
-          case "relay": {
-            const to = runOf(item.toRunId);
-            const name = to ? agentName(to, task.runs, devices, t) : "";
-            return (
-              <li
-                key={item.key}
-                id={`item-${item.key}`}
-                className="anim-slide scroll-mt-4 pl-9 text-[13px] leading-relaxed text-muted"
-              >
-                <span className="font-medium">
-                  {t(`timeline.relay.${item.relay}`, { name })}
-                </span>
-                {item.text && (
-                  <span className="whitespace-pre-wrap break-words">
-                    {" "}
-                    {nameDevices(item.text, devices)}
-                  </span>
-                )}
-              </li>
-            );
-          }
-          case "message":
-          case "question":
-            if (item.kind === "question" && item.to === "main")
+          )}
+          {((): ReactNode => {
+            if (block.kind === "round") {
               return (
                 <li
-                  key={item.key}
-                  id={`item-${item.key}`}
-                  className="anim-slide scroll-mt-4 pl-9 text-[13px] leading-relaxed text-muted"
+                  key={block.key}
+                  id={`item-${block.key}`}
+                  className="anim-slide scroll-mt-4"
                 >
-                  <span className="font-medium">
-                    {t("timeline.askedMain", {
-                      name:
-                        subAgent(item.runId) ??
-                        (runOf(item.runId)
-                          ? agentName(runOf(item.runId)!, task.runs, devices, t)
-                          : t("panel.mainAgent")),
-                    })}
-                  </span>{" "}
-                  <span className="whitespace-pre-wrap break-words">
-                    {nameDevices(item.text, devices)}
-                  </span>
+                  <Round
+                    task={task}
+                    items={block.items}
+                    devices={devices}
+                    live={
+                      inRound && index === list.length - 1 ? (
+                        <Working
+                          task={task}
+                          run={root}
+                          devices={devices}
+                          saying={saying}
+                          notice={notice}
+                        />
+                      ) : undefined
+                    }
+                  />
                 </li>
               );
-            return (
-              <li
-                key={item.key}
-                id={`item-${item.key}`}
-                className="anim-slide flex scroll-mt-4 gap-3"
-              >
-                <span
-                  aria-hidden
-                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
-                >
-                  W
-                </span>
-                <div
-                  className={cn(
-                    "min-w-0 flex-1 text-[15px] leading-relaxed",
-                    item.kind === "question" &&
-                      "rounded-xl border border-amber/40 bg-amber-soft/60 px-4 py-3",
-                  )}
-                >
-                  {item.kind === "question" ? (
-                    <div className="mb-1 flex items-baseline gap-2 text-[12.5px] font-medium text-amber">
-                      <span className="min-w-0 flex-1">
-                        {subAgent(item.runId)
-                          ? t(
-                              item.viaMain
-                                ? "timeline.questionByVia"
-                                : "timeline.questionBy",
-                              { name: subAgent(item.runId)! },
-                            )
-                          : t("timeline.question")}
-                      </span>
-                      {place(item.key) >= 0 && queue.length > 1 && (
-                        <span className="shrink-0 tabular-nums text-amber/80">
-                          {t("question.place", {
-                            n: String(place(item.key) + 1),
-                            count: String(queue.length),
+            }
+            const item = block.item;
+            switch (item.kind) {
+              case "input":
+                return (
+                  <li
+                    key={item.key}
+                    id={`item-${item.key}`}
+                    className="group/msg anim-slide flex scroll-mt-4 flex-col items-end"
+                  >
+                    <div className="max-w-[85%] rounded-2xl rounded-br-md bg-fill px-4 py-2.5 text-[15px] leading-relaxed">
+                      {item.input.kind === "constraint" && (
+                        <div className="mb-0.5 text-[12px] font-medium text-accent">
+                          {t("timeline.constraint")}
+                        </div>
+                      )}
+                      {subAgent(item.input.run_id ?? undefined) && (
+                        <div className="mb-0.5 text-[12px] font-medium text-muted">
+                          {t("timeline.replyTo", {
+                            name: subAgent(item.input.run_id ?? undefined)!,
                           })}
-                        </span>
+                        </div>
                       )}
+                      <span className="whitespace-pre-wrap break-words">
+                        {item.input.text}
+                      </span>
+                      <SentFiles files={filesOf(task, item.input)} />
                     </div>
-                  ) : (
-                    subAgent(item.runId) && (
-                      <div className="mb-0.5 text-[12.5px] font-medium text-muted">
-                        {subAgent(item.runId)}
-                      </div>
-                    )
-                  )}
-                  {item.kind === "question" && item.stopped !== undefined ? (
-                    <p>
-                      {t(
-                        `question.stopped.${stopReason(item.stopped) || "other"}`,
+                    <div className="mt-0.5 px-1">
+                      {said(item.input.created_at)}
+                    </div>
+                    <MessageActions
+                      task={task}
+                      input={item.input}
+                      onEdit={onEdit}
+                      onChange={onChange}
+                    />
+                  </li>
+                );
+              case "relay": {
+                const to = runOf(item.toRunId);
+                const name = to ? agentName(to, task.runs, devices, t) : "";
+                return (
+                  <li
+                    key={item.key}
+                    id={`item-${item.key}`}
+                    className="anim-slide scroll-mt-4 pl-9 text-[13px] leading-relaxed text-muted"
+                  >
+                    <span className="font-medium">
+                      {t(`timeline.relay.${item.relay}`, { name })}
+                    </span>
+                    {item.text && (
+                      <span className="whitespace-pre-wrap break-words">
+                        {" "}
+                        {nameDevices(item.text, devices)}
+                      </span>
+                    )}
+                  </li>
+                );
+              }
+              case "message":
+              case "question":
+                if (item.kind === "question" && item.to === "main")
+                  return (
+                    <li
+                      key={item.key}
+                      id={`item-${item.key}`}
+                      className="anim-slide scroll-mt-4 pl-9 text-[13px] leading-relaxed text-muted"
+                    >
+                      <span className="font-medium">
+                        {t("timeline.askedMain", {
+                          name:
+                            subAgent(item.runId) ??
+                            (runOf(item.runId)
+                              ? agentName(
+                                  runOf(item.runId)!,
+                                  task.runs,
+                                  devices,
+                                  t,
+                                )
+                              : t("panel.mainAgent")),
+                        })}
+                      </span>{" "}
+                      <span className="whitespace-pre-wrap break-words">
+                        {nameDevices(item.text, devices)}
+                      </span>
+                    </li>
+                  );
+                return (
+                  <li
+                    key={item.key}
+                    id={`item-${item.key}`}
+                    className="group/msg anim-slide flex scroll-mt-4 gap-3"
+                  >
+                    <span
+                      aria-hidden
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
+                    >
+                      W
+                    </span>
+                    <div
+                      className={cn(
+                        "min-w-0 flex-1 text-[15px] leading-relaxed",
+                        item.kind === "question" &&
+                          "rounded-xl border border-amber/40 bg-amber-soft/60 px-4 py-3",
                       )}
-                    </p>
-                  ) : (
-                    <Rich text={nameDevices(item.text, devices)} />
-                  )}
-                  {item.kind === "question" &&
-                    (item.key === current ? (
-                      <QuestionAnswer
+                    >
+                      {item.kind === "question" ? (
+                        <div className="mb-1 flex items-baseline gap-2 text-[12.5px] font-medium text-amber">
+                          <span className="min-w-0 flex-1">
+                            {subAgent(item.runId)
+                              ? t(
+                                  item.viaMain
+                                    ? "timeline.questionByVia"
+                                    : "timeline.questionBy",
+                                  { name: subAgent(item.runId)! },
+                                )
+                              : t("timeline.question")}
+                          </span>
+                          {place(item.key) >= 0 && queue.length > 1 && (
+                            <span className="shrink-0 tabular-nums text-amber/80">
+                              {t("question.place", {
+                                n: String(place(item.key) + 1),
+                                count: String(queue.length),
+                              })}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        subAgent(item.runId) && (
+                          <div className="mb-0.5 text-[12.5px] font-medium text-muted">
+                            {subAgent(item.runId)}
+                          </div>
+                        )
+                      )}
+                      {item.kind === "question" &&
+                      item.stopped !== undefined ? (
+                        <p>
+                          {t(
+                            `question.stopped.${stopReason(item.stopped) || "other"}`,
+                          )}
+                        </p>
+                      ) : (
+                        <Rich text={nameDevices(item.text, devices)} />
+                      )}
+                      {item.kind === "question" &&
+                        (item.key === current ? (
+                          <QuestionAnswer
+                            task={task}
+                            runId={
+                              runOf(item.runId)?.parent_run_id
+                                ? item.runId
+                                : undefined
+                            }
+                            options={item.options}
+                            recommended={item.recommended}
+                            onChange={onChange}
+                          />
+                        ) : (
+                          place(item.key) > 0 && (
+                            <p className="mt-2 text-[12.5px] text-muted">
+                              {t("question.queued")}
+                            </p>
+                          )
+                        ))}
+                      <div className="mt-0.5">{said(item.at)}</div>
+                    </div>
+                  </li>
+                );
+              case "plan":
+                return (
+                  <li
+                    key={item.key}
+                    id={`item-${item.key}`}
+                    className="anim-slide flex scroll-mt-4 gap-3"
+                  >
+                    <span
+                      aria-hidden
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
+                    >
+                      W
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <PlanCard
                         task={task}
-                        runId={
-                          runOf(item.runId)?.parent_run_id
-                            ? item.runId
-                            : undefined
-                        }
-                        options={item.options}
-                        recommended={item.recommended}
+                        text={item.text}
+                        open={item.key === openPlan}
+                        onChange={onChange}
+                      />
+                    </div>
+                  </li>
+                );
+              case "skill":
+                return (
+                  <li key={item.key} className="anim-slide flex gap-3">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg",
+                        item.superseded && "invisible",
+                      )}
+                    >
+                      W
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <SkillDraftCard
+                        draft={item.draft}
+                        superseded={item.superseded}
+                        task={task}
+                      />
+                    </div>
+                  </li>
+                );
+              case "proposal":
+                return (
+                  <li key={item.key} className="anim-slide flex gap-3">
+                    <span
+                      aria-hidden
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
+                    >
+                      W
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <ProposalCard proposal={item.proposal} />
+                    </div>
+                  </li>
+                );
+              case "memory":
+                // Someone's memory is theirs: others viewing the task do not see it.
+                return task.created_by &&
+                  task.created_by !== me?.user_id ? null : (
+                  <li key={item.key} className="anim-slide">
+                    <MemoryCard memory={item.memory} onChange={onChange} />
+                  </li>
+                );
+              case "purchase":
+                return (
+                  <li key={item.key} className="anim-slide flex gap-3">
+                    <span
+                      aria-hidden
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
+                    >
+                      W
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <PurchaseCard
+                        task={task}
+                        purchase={item.purchase}
+                        devices={devices}
+                        onChange={onChange}
+                      />
+                    </div>
+                  </li>
+                );
+              case "result":
+                // What a round ended with is the agent's own words, as a message, with the
+                // screenshots it rests on; a round that failed says why in red.
+                return (
+                  <li
+                    key={item.key}
+                    id={`item-${item.key}`}
+                    className="anim-slide flex scroll-mt-4 gap-3"
+                  >
+                    <span
+                      aria-hidden
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
+                    >
+                      W
+                    </span>
+                    <div
+                      className={cn(
+                        "min-w-0 flex-1 text-[15px] leading-relaxed",
+                        item.failed && "text-red",
+                      )}
+                    >
+                      {item.result.failure ? (
+                        <p>{t(`result.failure.${item.result.failure}`)}</p>
+                      ) : (
+                        <Rich
+                          text={nameDevices(item.result.summary, devices)}
+                        />
+                      )}
+                      <Evidence
+                        task={task}
+                        ids={item.result.evidence_observation_ids}
+                        devices={devices}
+                      />
+                      {/* Offered on the last thing said, until the person goes on. */}
+                      {item.result.offer_skill &&
+                        !scope &&
+                        !live &&
+                        index === list.length - 1 && (
+                          <SkillOffer task={task} onChange={onChange} />
+                        )}
+                    </div>
+                  </li>
+                );
+              case "status":
+                return (
+                  <li
+                    key={item.key}
+                    id={`item-${item.key}`}
+                    className="flex scroll-mt-4 items-center gap-2 text-[12.5px] text-faint"
+                  >
+                    <span className="h-px flex-1 bg-line" />
+                    {t(item.message, {
+                      ...item.vars,
+                      // A device named by id is shown by its name.
+                      ...(item.vars?.device && {
+                        device:
+                          devices.find((d) => d.id === item.vars?.device)
+                            ?.name ?? t("common.device"),
+                      }),
+                    })}
+                    <span className="h-px flex-1 bg-line" />
+                  </li>
+                );
+              case "action": {
+                const a = item.action;
+                const unknown = a.status === "done" && a.effect === "unknown";
+                return (
+                  <li
+                    key={item.key}
+                    id={`item-${item.key}`}
+                    className="anim-slide scroll-mt-4"
+                  >
+                    {a.status === "awaiting_approval" ? (
+                      <ApprovalCard
+                        task={task}
+                        action={a}
+                        device={device(a.device_id)}
+                        onChange={onChange}
+                      />
+                    ) : a.approval && !unknown ? (
+                      <ApprovalRecord
+                        task={task}
+                        action={a}
+                        device={device(a.device_id)}
                         onChange={onChange}
                       />
                     ) : (
-                      place(item.key) > 0 && (
-                        <p className="mt-2 text-[12.5px] text-muted">
-                          {t("question.queued")}
-                        </p>
-                      )
-                    ))}
-                </div>
-              </li>
-            );
-          case "plan":
-            return (
-              <li
-                key={item.key}
-                id={`item-${item.key}`}
-                className="anim-slide flex scroll-mt-4 gap-3"
-              >
-                <span
-                  aria-hidden
-                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
-                >
-                  W
-                </span>
-                <div className="min-w-0 flex-1">
-                  <PlanCard
-                    task={task}
-                    text={item.text}
-                    open={item.key === openPlan}
-                    onChange={onChange}
-                  />
-                </div>
-              </li>
-            );
-          case "skill":
-            return (
-              <li key={item.key} className="anim-slide flex gap-3">
-                <span
-                  aria-hidden
-                  className={cn(
-                    "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg",
-                    item.superseded && "invisible",
-                  )}
-                >
-                  W
-                </span>
-                <div className="min-w-0 flex-1">
-                  <SkillDraftCard
-                    draft={item.draft}
-                    superseded={item.superseded}
-                    task={task}
-                  />
-                </div>
-              </li>
-            );
-          case "proposal":
-            return (
-              <li key={item.key} className="anim-slide flex gap-3">
-                <span
-                  aria-hidden
-                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
-                >
-                  W
-                </span>
-                <div className="min-w-0 flex-1">
-                  <ProposalCard proposal={item.proposal} />
-                </div>
-              </li>
-            );
-          case "memory":
-            // Someone's memory is theirs: others viewing the task do not see it.
-            return task.created_by && task.created_by !== me?.user_id ? null : (
-              <li key={item.key} className="anim-slide">
-                <MemoryCard memory={item.memory} onChange={onChange} />
-              </li>
-            );
-          case "purchase":
-            return (
-              <li key={item.key} className="anim-slide flex gap-3">
-                <span
-                  aria-hidden
-                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
-                >
-                  W
-                </span>
-                <div className="min-w-0 flex-1">
-                  <PurchaseCard
-                    task={task}
-                    purchase={item.purchase}
-                    devices={devices}
-                    onChange={onChange}
-                  />
-                </div>
-              </li>
-            );
-          case "result":
-            // What a round ended with is the agent's own words, as a message, with the
-            // screenshots it rests on; a round that failed says why in red.
-            return (
-              <li
-                key={item.key}
-                id={`item-${item.key}`}
-                className="anim-slide flex scroll-mt-4 gap-3"
-              >
-                <span
-                  aria-hidden
-                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fg text-[11px] font-semibold text-bg"
-                >
-                  W
-                </span>
-                <div
-                  className={cn(
-                    "min-w-0 flex-1 text-[15px] leading-relaxed",
-                    item.failed && "text-red",
-                  )}
-                >
-                  {item.result.failure ? (
-                    <p>{t(`result.failure.${item.result.failure}`)}</p>
-                  ) : (
-                    <Rich text={nameDevices(item.result.summary, devices)} />
-                  )}
-                  <Evidence
-                    task={task}
-                    ids={item.result.evidence_observation_ids}
-                    devices={devices}
-                  />
-                  {/* Offered on the last thing said, until the person goes on. */}
-                  {item.result.offer_skill &&
-                    !scope &&
-                    !live &&
-                    index === list.length - 1 && (
-                      <SkillOffer task={task} onChange={onChange} />
+                      <UnknownCard
+                        task={task}
+                        action={a}
+                        device={device(a.device_id)}
+                        onChange={onChange}
+                        onTakeOver={
+                          ["active", "paused"].includes(task.status)
+                            ? () => onTakeOver(a.device_id)
+                            : undefined
+                        }
+                      />
                     )}
-                </div>
-              </li>
-            );
-          case "status":
-            return (
-              <li
-                key={item.key}
-                id={`item-${item.key}`}
-                className="flex scroll-mt-4 items-center gap-2 text-[12.5px] text-faint"
-              >
-                <span className="h-px flex-1 bg-line" />
-                {t(item.message, {
-                  ...item.vars,
-                  // A device named by id is shown by its name.
-                  ...(item.vars?.device && {
-                    device:
-                      devices.find((d) => d.id === item.vars?.device)?.name ??
-                      t("common.device"),
-                  }),
-                })}
-                <span className="h-px flex-1 bg-line" />
-              </li>
-            );
-          case "action": {
-            const a = item.action;
-            const unknown = a.status === "done" && a.effect === "unknown";
-            return (
-              <li
-                key={item.key}
-                id={`item-${item.key}`}
-                className="anim-slide scroll-mt-4"
-              >
-                {a.status === "awaiting_approval" ? (
-                  <ApprovalCard
-                    task={task}
-                    action={a}
-                    device={device(a.device_id)}
-                    onChange={onChange}
-                  />
-                ) : a.approval && !unknown ? (
-                  <ApprovalRecord
-                    task={task}
-                    action={a}
-                    device={device(a.device_id)}
-                    onChange={onChange}
-                  />
-                ) : (
-                  <UnknownCard
-                    task={task}
-                    action={a}
-                    device={device(a.device_id)}
-                    onChange={onChange}
-                    onTakeOver={
-                      ["active", "paused"].includes(task.status)
-                        ? () => onTakeOver(a.device_id)
-                        : undefined
-                    }
-                  />
-                )}
-              </li>
-            );
-          }
-        }
-        return null;
-      })}
+                  </li>
+                );
+              }
+            }
+            return null;
+          })()}
+        </Fragment>
+      ))}
       {shown && (
         // The agent's words as they come: a message in the making, in the same
         // bubble its message will have once the step is over, at an even pace. A

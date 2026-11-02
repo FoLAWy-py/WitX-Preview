@@ -7,7 +7,7 @@
 # plugins (when the backup has them: older ones do not), then
 # runs `witx admin recover` before anything starts again: it replays the restore ledger
 # (tasks deleted and Gateways or devices disabled after the backup stay so) and stops
-# what was in flight (spec §16.2). Leaves ledger/ in the object store untouched.
+# what was in flight. Leaves ledger/ in the object store untouched.
 set -eu
 cd "$(dirname "$0")"
 stamp=$1

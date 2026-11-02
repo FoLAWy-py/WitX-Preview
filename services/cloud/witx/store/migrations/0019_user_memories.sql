@@ -1,4 +1,4 @@
--- Long-term memory : what a person chose to have remembered for their
+-- Long-term memory: what a person chose to have remembered for their
 -- future tasks. The agent may propose an entry; only the person keeps it. Each entry
 -- belongs to one user in one tenant and is never shown to anyone else's tasks.
 CREATE TABLE user_memories (

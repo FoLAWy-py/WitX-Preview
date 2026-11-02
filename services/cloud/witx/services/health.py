@@ -1,4 +1,4 @@
-"""Readiness : can this API process do its work right now? Liveness is
+"""Readiness: can this API process do its work right now? Liveness is
 /health; this checks the dependencies a request needs."""
 
 import logging

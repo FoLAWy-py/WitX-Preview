@@ -73,6 +73,29 @@ export function money(amount: string, currency: string, locale: Locale) {
 export const number = (n: number, locale: Locale) =>
   new Intl.NumberFormat(locale).format(n);
 
+/** A moment for a line in a conversation: "Today 10:23", "Yesterday 22:05",
+ * otherwise as `moment` says it. */
+export function dayMoment(
+  iso: string,
+  locale: Locale,
+  t: Translate,
+  now = new Date(),
+): string {
+  const at = new Date(iso);
+  const time = new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(at);
+  if (at.toDateString() === now.toDateString())
+    return t("time.today", { time });
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (at.toDateString() === yesterday.toDateString())
+    return t("time.yesterday", { time });
+  return moment(iso, locale, now);
+}
+
 /** A moment in words, as precise as it needs to be: "13:16" today, "Oct 14, 13:16" this
  * year, with the year before that. */
 export function moment(iso: string, locale: Locale, now = new Date()): string {

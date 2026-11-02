@@ -50,6 +50,8 @@ class WaitReason(StrEnum):
     MODEL_RETRY = "model_retry"
     PAUSED = "paused"  # the task is paused; only resuming it wakes the run
     AGENT = "agent"  # a sub-agent waits for the main agent's answer
+    # An input's effect is unknown: the run waits for the user's ruling on it.
+    UNKNOWN = "unknown"
 
 
 class ActionStatus(StrEnum):
@@ -113,14 +115,14 @@ ORDINARY_RECORDS = (
     "reminder, calendar event or draft, is change_data and none of the sensitive effects "
     "by itself; deleting one is delete_data."
 )
-# change_data is the one effect that is not sensitive: "ask" mode waits for it (decision
-# D10), "auto" lets it run.
+# change_data is the one effect that is not sensitive: "ask" mode waits for it,
+# "auto" lets it run.
 CHANGE_EFFECT = "change_data"
 SENSITIVE_EFFECTS = frozenset(EFFECT_DEFINITIONS) - {CHANGE_EFFECT}
 # Effects that always need the user's approval, whatever the permission mode.
 PAYMENT_EFFECTS = frozenset({"payment"})
 # What "auto" still asks about: money, and what cannot be taken back. Messages and
-# orders (paid for in a later step) go ahead (user decision, D10).
+# orders (paid for in a later step) go ahead (user decision).
 AUTO_ASK_EFFECTS = frozenset({"payment", "delete_data", "share_data", "account_change"})
 # Typed text that points at money; a phone number or address in a message does not.
 MONEY_FLAGS = frozenset({"money", "card_number"})
@@ -240,6 +242,8 @@ class Task:
     group_id: UUID | None = None
     reasoning_effort: str = "medium"
     title: str | None = None  # summarised from the first message; None until then
+    # The language the first message is written in, named with the title.
+    language: str | None = None
     timezone: str = "UTC"  # the starter's, for "tomorrow" and proposed schedules
     request: str = ""  # the first message; `goal` is set only for complex or long work
     goal_paused: bool = False  # the user paused the goal; the agent follows the messages
@@ -369,7 +373,7 @@ class Action:
     sent_at: datetime | None = None
     finished_at: datetime | None = None
     policy: Policy | None = None
-    found_apps: list[dict[str, Any]] | None = None  # find_app: matches, best first
+    found_apps: list[dict[str, Any]] | None = None  # launch_app by query: matches, best first
     intent: dict[str, str] | None = None  # a message's or payment's terms, approved with it
     reconciled_by: UUID | None = None  # the person who settled an unknown effect
     retry_of: UUID | None = None  # the action, confirmed without effect, this one retries
@@ -460,7 +464,8 @@ class Device:
     epoch: int
     sensitive_apps: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)  # empty: it can take tasks
-    enabled: bool = False  # an owner enabled it on the Web app (device pool, #33)
+    enabled: bool = False  # an owner enabled it on the Web app (device pool)
+    last_seen_at: datetime | None = None  # its Gateway last had it connected
 
 
 @dataclass(frozen=True)
@@ -506,15 +511,31 @@ class Step:
 
 
 @dataclass(frozen=True)
+class TaskFile:
+    """A file the user gave a task, in object storage at ``files.key``. Attached
+    with a message (``input_seq``; None with the task's first message), or not yet."""
+
+    id: UUID
+    task_id: UUID | None
+    input_seq: int | None
+    name: str
+    size: int
+    sha256: str
+    content_type: str
+    created_by: UUID
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class Memory:
-    """Something kept for a person's future tasks (§8.2): written by them, or by an agent
+    """Something kept for a person's future tasks: written by them, or by an agent
     on its own. ``kind``: "user" (their preferences), "feedback" (how they corrected
     or confirmed the agent), "app" (how ``app`` works)."""
 
     id: UUID
     user_id: UUID
     text: str
-    status: str  # "kept"; "declined" for proposals from before D59
+    status: str  # "kept"; "declined" for proposals from before auto memory
     source_task_id: UUID | None
     created_at: datetime
     decided_at: datetime | None = None

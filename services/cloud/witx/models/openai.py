@@ -1,6 +1,6 @@
 """OpenAI Responses API adapter. The Harness acts on complete responses only; a call is
 streamed when someone wants to read the agent's words as they come
-(``ModelRequest.on_text``, D67), and the completed response at the end of the stream is
+(``ModelRequest.on_text``), and the completed response at the end of the stream is
 what it acts on."""
 
 import contextlib

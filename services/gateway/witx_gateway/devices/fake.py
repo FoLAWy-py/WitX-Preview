@@ -48,7 +48,7 @@ class FakeDevice:
             "volume_down",
             "lock",
             "launch_app",
-            "find_app",
+            "receive_file",
         ]
     )
     inputs: list[tuple[str, Any]] = field(default_factory=list)
@@ -201,4 +201,8 @@ class FakeDevice:
 
     async def launch_app(self, app_id: str) -> None:
         await self._input("launch_app", app_id)
+        self.foreground_app = app_id
+
+    async def open_link(self, url: str, app_id: str) -> None:
+        await self._input("open_link", (url, app_id))
         self.foreground_app = app_id

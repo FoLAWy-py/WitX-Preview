@@ -4,7 +4,7 @@ export interface ActionView {
   id: string;
   run_id: string;
   device_id: string;
-  kind: "tap" | "swipe" | "long_press" | "double_tap" | "pinch" | "type_text" | "set_picker" | "select_option" | "back" | "home" | "volume_up" | "volume_down" | "lock" | "launch_app" | "find_app";
+  kind: "tap" | "swipe" | "long_press" | "double_tap" | "pinch" | "type_text" | "set_picker" | "select_option" | "back" | "home" | "volume_up" | "volume_down" | "lock" | "launch_app" | "receive_file";
   input: Record<string, unknown>;
   target: string;
   expected_effect: string;
@@ -45,7 +45,7 @@ export interface DevLogin {
 }
 
 export interface DeviceChange {
-  change: "enabled" | "disabled" | "taken_over";
+  change: "enabled" | "disabled" | "taken_over" | "removed";
   name: string;
   by: string;
   at: string;
@@ -60,13 +60,14 @@ export interface DeviceView {
   name: string;
   platform: "android" | "ios" | "fake";
   online: boolean;
-  capabilities: ("tap" | "swipe" | "long_press" | "double_tap" | "pinch" | "type_text" | "set_picker" | "select_option" | "back" | "home" | "volume_up" | "volume_down" | "lock" | "launch_app" | "find_app")[];
+  capabilities: ("tap" | "swipe" | "long_press" | "double_tap" | "pinch" | "type_text" | "set_picker" | "select_option" | "back" | "home" | "volume_up" | "volume_down" | "lock" | "launch_app" | "receive_file")[];
   task_id: string | null;
   task_goal: string | null;
   pool: string;
   problems: ("disconnected" | "tool_missing" | "adb_unauthorized" | "adb_offline" | "not_paired" | "developer_mode_off" | "appium_unreachable" | "driver_missing" | "wda_unsigned" | "identity_changed" | "not_responding" | "locked")[];
   enabled: boolean;
   taken_over?: boolean;
+  last_seen_at?: string | null;
 }
 
 export interface DevicesUpdate {
@@ -81,6 +82,15 @@ export interface EventView {
   seq: number;
   type: string;
   data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface FileView {
+  id: string;
+  name: string;
+  size: number;
+  content_type: string;
+  input_seq?: number | null;
   created_at: string;
 }
 
@@ -300,7 +310,7 @@ export interface RunView {
   parent_run_id: string | null;
   goal: string;
   status: "runnable" | "running" | "waiting" | "completed" | "failed" | "cancelled";
-  wait_reason: "observation" | "action" | "approval" | "user_input" | "children" | "device" | "model_retry" | "paused" | "agent" | null;
+  wait_reason: "observation" | "action" | "approval" | "user_input" | "children" | "device" | "model_retry" | "paused" | "agent" | "unknown" | null;
   wait_detail: string | null;
   device_ids: string[];
   created_at: string;
@@ -484,6 +494,7 @@ export interface TaskChanges {
   usage: UsageView;
   result: TaskResult | null;
   inputs: TaskInputView[];
+  files?: FileView[];
   runs: RunView[];
   actions: ActionView[];
   grants: GrantView[];
@@ -509,6 +520,7 @@ export interface TaskCreate {
   reasoning_effort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
   timezone?: string;
   group_id?: string | null;
+  file_ids?: string[];
 }
 
 export interface TaskDetail {
@@ -532,6 +544,7 @@ export interface TaskDetail {
   usage: UsageView;
   result: TaskResult | null;
   inputs: TaskInputView[];
+  files?: FileView[];
   runs: RunView[];
   actions: ActionView[];
   grants: GrantView[];
@@ -573,6 +586,7 @@ export interface TaskInputCreate {
   text: string;
   run_id?: string | null;
   resume?: boolean;
+  file_ids?: string[];
 }
 
 export interface TaskInputView {

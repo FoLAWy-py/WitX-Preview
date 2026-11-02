@@ -124,15 +124,6 @@ async def test_an_app_that_is_not_installed_is_refused_before_anything_happens(
     assert h.results()[0] == h.results()[0] | {"outcome": "rejected", "reason": "app_not_installed"}
 
 
-async def test_an_app_search_answers_with_matches_and_touches_nothing(tmp_path: Path) -> None:
-    device = FakeDevice(installed_apps=["com.huawei.calculator", "com.android.settings"])
-    h = Harness(tmp_path, device)
-    await h.executor.action(h.action(input={"kind": "find_app", "query": "calculator"}))
-    assert h.device.inputs == []
-    assert h.results()[0]["outcome"] == "returned"
-    assert h.results()[0]["apps"] == [{"app_id": "com.huawei.calculator", "name": None}]
-
-
 async def test_an_app_opened_by_name_is_the_best_match_and_the_matches_are_reported(
     tmp_path: Path,
 ) -> None:
@@ -155,6 +146,40 @@ async def test_a_name_no_installed_app_matches_opens_nothing(tmp_path: Path) -> 
 def test_an_app_is_opened_by_its_id_or_by_name_not_both(launch: dict[str, str]) -> None:
     with pytest.raises(ValueError, match="app_id or query"):
         LaunchApp(**launch)
+
+
+SHA = "ab" * 32
+LINK = "http://192.168.1.20:47088/api/v1/downloads/claim.mac"
+
+
+async def test_a_file_is_handed_to_the_witx_app_by_its_deep_link(tmp_path: Path) -> None:
+    device = FakeDevice(installed_apps=["com.android.settings", "com.witx.app.testteam01"])
+    h = Harness(tmp_path, device)
+    received = {"kind": "receive_file", "file_id": str(uuid4()), "url": LINK, "sha256": SHA}
+    await h.executor.action(h.action(input=received))
+    deep = (
+        "witx://download?url=http%3A%2F%2F192.168.1.20%3A47088%2Fapi%2Fv1%2Fdownloads"
+        f"%2Fclaim.mac&sha256={SHA}"
+    )
+    assert h.device.inputs == [("open_link", (deep, "com.witx.app.testteam01"))]
+    assert h.results()[0]["outcome"] == "returned"
+
+
+async def test_a_file_for_a_phone_without_the_witx_app_is_refused_before_anything_happens(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path, FakeDevice(installed_apps=["com.android.settings"]))
+    received = {"kind": "receive_file", "file_id": str(uuid4()), "url": LINK, "sha256": SHA}
+    await h.executor.action(h.action(input=received))
+    assert h.device.inputs == []
+    assert h.results()[0] == h.results()[0] | {"outcome": "rejected", "reason": "witx_app_missing"}
+
+
+async def test_a_file_without_its_link_is_refused(tmp_path: Path) -> None:
+    h = Harness(tmp_path, FakeDevice(installed_apps=["com.witx.app.dev"]))
+    await h.executor.action(h.action(input={"kind": "receive_file", "file_id": str(uuid4())}))
+    assert h.device.inputs == []
+    assert h.results()[0]["outcome"] == "rejected"
 
 
 async def test_a_screenshot_that_cannot_be_uploaded_is_reported_failed(

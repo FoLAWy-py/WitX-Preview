@@ -10,6 +10,7 @@ from witx.domain.rules.account import *  # noqa: F403
 from witx.domain.rules.agent import *  # noqa: F403
 from witx.domain.rules.common import *  # noqa: F403
 from witx.domain.rules.devices import *  # noqa: F403
+from witx.domain.rules.files import *  # noqa: F403
 from witx.domain.rules.inputs import *  # noqa: F403
 from witx.domain.rules.loops import *  # noqa: F403
 from witx.domain.rules.memory import *  # noqa: F403

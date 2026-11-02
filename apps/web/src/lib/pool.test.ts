@@ -4,6 +4,8 @@ import en from "@/i18n/en";
 import zh from "@/i18n/zh";
 import {
   byPool,
+  gone,
+  goneLast,
   ready,
   readyFirst,
   takeoverable,
@@ -117,6 +119,20 @@ describe("a locked phone", () => {
       "taken",
       "locked",
       "off",
+    ]);
+  });
+});
+
+describe("gone", () => {
+  it("is a device its Gateway does not have connected, and those come last in a pool", () => {
+    const here = device({ id: "here" });
+    const unplugged = device({ id: "unplugged", problems: ["disconnected"] });
+    const offline = device({ id: "offline", online: false });
+    expect([here, unplugged, offline].map(gone)).toEqual([false, true, true]);
+    expect(goneLast([unplugged, here, offline]).map((d) => d.id)).toEqual([
+      "here",
+      "unplugged",
+      "offline",
     ]);
   });
 });

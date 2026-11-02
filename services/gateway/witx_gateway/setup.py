@@ -1,5 +1,5 @@
 """`witx-gateway --config gateway.toml setup`: fixes what this computer and its devices
-still need and a program can fix (device pool, #134), on this computer, after the person
+still need and a program can fix (device pool), on this computer, after the person
 at it confirms.
 
 ``doctor`` only looks. ``setup`` turns the same findings into a plan of steps and runs

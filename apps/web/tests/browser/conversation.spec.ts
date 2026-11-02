@@ -417,15 +417,15 @@ test("a failed task says why at the end of the conversation", async ({
     completed_at: "2026-10-10T10:05:00Z",
     failure: "step_limit",
   };
-  const search = {
+  const opening = {
     ...task.actions[0],
-    kind: "find_app",
-    input: { kind: "find_app", query: "Notes" },
-    target: "the installed apps",
-    expected_effect: "a list of matching apps",
+    kind: "launch_app",
+    input: { kind: "launch_app", query: "Notes", app_id: null },
+    target: "Notes",
+    expected_effect: "Notes opens",
     effects: [],
     status: "done",
-    effect: "no_effect",
+    effect: "unverified",
     approval: null,
     policy: { mode: "auto", decision: "allow", reasons: [], risk: null },
     intent: null,
@@ -433,7 +433,7 @@ test("a failed task says why at the end of the conversation", async ({
   const failed = {
     ...task,
     status: "failed",
-    actions: [search],
+    actions: [opening],
     runs: [{ ...task.runs[0], status: "failed", wait_reason: null, result }],
     result,
   };
@@ -560,4 +560,33 @@ test("the status line says what the step is at, and a refused completion stays f
   const making = page.locator("#item-saying");
   await expect(making).toContainText("Sound is off.");
   await expect(making).toHaveAttribute("data-refused", "true");
+});
+
+test.describe("the times of a conversation", () => {
+  test.use({ timezoneId: "UTC", locale: "en-US" });
+
+  test("are said before the first message, and each message shows its own when pointed at", async ({
+    page,
+  }) => {
+    await mockApi(page, []);
+    await page.goto("/sign-in");
+    await page.getByLabel("Developer token").fill("dev-token");
+    await page.getByRole("button", { name: "Sign in with token" }).click();
+    await openTask(page);
+
+    const conversation = page.getByRole("list", { name: "Conversation" });
+    const first = conversation.locator("li > time").first();
+    await expect(first).toHaveAttribute("datetime", "2026-10-10T10:00:00Z");
+    // The date and time, however the browser words them ("Oct 10, 10:00", "Oct 10 at 10:00").
+    await expect(first).toHaveText(/^Oct 10\D+10:00$/);
+
+    const message = conversation
+      .getByText("Buy the item in the cart", { exact: true })
+      .locator("xpath=ancestor::li[1]");
+    const own = message.locator("time");
+    await expect(own).toHaveCSS("opacity", "0");
+    await message.hover();
+    await expect(own).toHaveText("10:00");
+    await expect(own).toHaveCSS("opacity", "1");
+  });
 });

@@ -346,24 +346,19 @@ test("a message of the person's can be copied, edited into the message box, or s
   await page.getByRole("button", { name: "Sign in with token" }).click();
   await openTask(page);
 
-  if (browserName === "chromium")
-    await page.evaluate(() => navigator.clipboard.writeText(""));
   await page.getByRole("button", { name: "Copy", exact: true }).click();
+  // Pasted, as the person would: WebKit lets a page read the clipboard only then. The copy
+  // is written a moment after the click, so the paste is tried until it holds the text.
   const box = page.getByLabel("Message to the agent");
-  if (browserName === "chromium") {
-    await expect
-      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toBe(task.inputs[0].text);
-  } else {
-    // WebKit permits reading the clipboard only through the person's paste.
-    await expect(
-      page.getByRole("button", { name: "Copied", exact: true }),
-    ).toBeVisible();
-    await box.focus();
-    await page.keyboard.press("ControlOrMeta+V");
-    await expect(box).toHaveValue(task.inputs[0].text);
-    await box.fill("");
-  }
+  await expect
+    .poll(async () => {
+      await box.fill("");
+      await box.focus();
+      await page.keyboard.press("ControlOrMeta+V");
+      return box.inputValue();
+    })
+    .toBe(task.inputs[0].text);
+  await box.fill("");
   await page.getByRole("button", { name: "Edit and send again" }).click();
   await expect(box).toHaveValue(task.inputs[0].text);
   await expect(box).toBeFocused();
@@ -600,4 +595,140 @@ test("a model that goes down to low offers it, and one that does not starts its 
   await expect
     .poll(() => created[0])
     .toMatchObject({ reasoning_effort: "medium" });
+});
+
+test("files attached to a message are uploaded first, sent with it, and shown under it", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  const uploads: string[] = [];
+  await page.route("**/api/v1/files?*", (route) => {
+    const name = new URL(route.request().url()).searchParams.get("name")!;
+    uploads.push(name);
+    return route.fulfill({
+      status: 201,
+      json: {
+        // By name, not by order: the two uploads run at once and may arrive either way.
+        id: name === "draft.txt" ? "f-2" : "f-1",
+        name,
+        size: 2400,
+        content_type: "application/pdf",
+        input_seq: null,
+        created_at: "2026-10-10T10:00:09Z",
+      },
+    });
+  });
+  // Once sent, the task holds the message and its file, as the server would.
+  const after = {
+    ...task,
+    inputs: [
+      ...task.inputs,
+      {
+        seq: 9,
+        kind: "note",
+        text: "Send these to Ann",
+        created_at: "2026-10-10T10:00:10Z",
+      },
+    ],
+    files: [
+      {
+        id: "f-1",
+        name: "季度报告.pdf",
+        size: 2400,
+        content_type: "application/pdf",
+        input_seq: 9,
+        created_at: "2026-10-10T10:00:09Z",
+      },
+    ],
+  };
+  const sent: unknown[] = [];
+  await page.route(detailOf("t1"), (route) =>
+    route.fulfill({ json: sent.length ? after : task }),
+  );
+  await page.route("**/api/v1/tasks/t1/inputs", (route) => {
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ json: after });
+  });
+  await signIn(page);
+  await openTask(page);
+
+  await page.locator("#note").fill("Send these to Ann");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await (
+    await chooser
+  ).setFiles([
+    {
+      name: "季度报告.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.alloc(2400),
+    },
+    { name: "draft.txt", mimeType: "text/plain", buffer: Buffer.from("x") },
+  ]);
+  const picked = page.getByRole("list", { name: "Files to send" });
+  await expect(picked.getByText("季度报告.pdf")).toBeVisible();
+  await page.getByRole("button", { name: "Remove draft.txt" }).click();
+  await expect(picked.getByText("draft.txt")).toBeHidden();
+  await page.locator("#note").press("Enter");
+
+  await expect
+    .poll(() => sent)
+    .toEqual([{ text: "Send these to Ann", resume: true, file_ids: ["f-1"] }]);
+  expect(uploads.sort()).toEqual(["draft.txt", "季度报告.pdf"]);
+  await expect(picked).toBeHidden();
+  const shown = page.getByRole("list", { name: "Files sent" });
+  await expect(shown.getByText("季度报告.pdf")).toBeVisible();
+  await expect(shown.getByText("2.4 KB")).toBeVisible();
+});
+
+test("the limits are said before files are picked, and a pick past them says what was left out", async ({
+  page,
+}) => {
+  await mockApi(page, []);
+  let uploads = 0;
+  await page.route("**/api/v1/files?*", (route) => {
+    uploads++;
+    return route.fulfill({
+      status: 201,
+      json: {
+        id: `f-${uploads}`,
+        name: new URL(route.request().url()).searchParams.get("name"),
+        size: 1,
+        content_type: "text/plain",
+        input_seq: null,
+        created_at: "2026-10-10T10:00:09Z",
+      },
+    });
+  });
+  await signIn(page);
+  await openTask(page);
+
+  const attach = page.getByRole("button", { name: "Attach files" });
+  await expect(attach).toHaveAttribute(
+    "title",
+    "Attach files · Up to 10 files per message, 100 MB each",
+  );
+  await page.locator("#note").fill("Send these");
+  const chooser = page.waitForEvent("filechooser");
+  await attach.click();
+  await (
+    await chooser
+  ).setFiles(
+    Array.from({ length: 11 }, (_, i) => ({
+      name: `note-${i + 1}.txt`,
+      mimeType: "text/plain",
+      buffer: Buffer.from("x"),
+    })),
+  );
+
+  const picked = page.getByRole("list", { name: "Files to send" });
+  await expect(picked.getByRole("listitem")).toHaveCount(10);
+  await expect(page.getByRole("alert")).toHaveText(
+    "A message carries at most 10 files: 1 more were not added.",
+  );
+  await expect(
+    page.getByText("Up to 10 files per message, 100 MB each"),
+  ).toBeVisible();
+  await expect(attach).toBeDisabled();
+  expect(uploads).toBe(10);
 });

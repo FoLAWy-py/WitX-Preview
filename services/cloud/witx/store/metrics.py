@@ -1,4 +1,4 @@
-"""The numbers behind /metrics , read from the database so that every API
+"""The numbers behind /metrics, read from the database so that every API
 instance reports the same values. Windows are the last 24 hours. Runs under one tenant's
 row-level security."""
 

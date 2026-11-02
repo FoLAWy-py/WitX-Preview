@@ -1,4 +1,4 @@
--- Grants : a person approves one held input "and the same kind". The
+-- Grants: a person approves one held input "and the same kind". The
 -- grant then approves later inputs of the task on the same phone and app, with the same
 -- effects (and, for a message, the same recipient and sender), for a limited number of
 -- uses and time, until revoked or the task is paused, stopped or resumed. Each input it

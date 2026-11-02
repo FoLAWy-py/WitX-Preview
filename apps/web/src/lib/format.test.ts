@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { duration, moment } from "./format";
+import { dayMoment, duration, moment } from "./format";
 
 describe("moment", () => {
   const now = new Date(2026, 9, 16, 18, 0);
@@ -27,5 +27,18 @@ describe("duration", () => {
     expect(duration(45_900, t as never)).toBe("45s");
     expect(duration(65_000, t as never)).toBe("1m 05s");
     expect(duration(3_725_000, t as never)).toBe("1h 02m 05s");
+  });
+});
+
+describe("dayMoment", () => {
+  const now = new Date(2026, 9, 16, 18, 0);
+  const t = ((key: string, vars: { time: string }) =>
+    `${key === "time.today" ? "Today" : "Yesterday"} ${vars.time}`) as never;
+  it("says today and yesterday by name, and an older day by its date", () => {
+    const at = (d: number, h: number, m: number) =>
+      new Date(2026, 9, d, h, m).toISOString();
+    expect(dayMoment(at(16, 10, 23), "en", t, now)).toBe("Today 10:23");
+    expect(dayMoment(at(15, 22, 5), "en", t, now)).toBe("Yesterday 22:05");
+    expect(dayMoment(at(1, 9, 0), "en", t, now)).toBe("Oct 1, 09:00");
   });
 });

@@ -1,4 +1,4 @@
-"""What a database restore must not undo : deleted tasks, and changes
+"""What a database restore must not undo: deleted tasks, and changes
 to who may act (Gateways disabled, revoked or enabled again; devices enabled or not).
 
 Each change is also written, before it is made, to the object store under ``ledger/``:

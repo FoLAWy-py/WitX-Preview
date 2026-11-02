@@ -1,4 +1,4 @@
-"""Approvals: which inputs need a person's approval, and what an approval covers (D10, D32, D33)."""
+"""Approvals: which inputs need a person's approval, and what an approval covers."""
 
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -44,33 +44,38 @@ def decide_policy(
 ) -> Policy:
     """Decides whether an input may run now or must wait for the user's approval.
 
-        Three independent signals mark an input sensitive: the effects the model declared,
-        the risk assessor's verdict (a failed assessment counts as sensitive), and
-        deterministic rules (sensitive apps, personal data in typed text). Any one is enough.
-        An input changes data if either the model or the risk assessor says change_data,
-        or if it is sensitive (a failed assessment cannot rule a change out).
+    Three independent signals mark an input sensitive: the effects the model declared,
+    the risk assessor's verdict (a failed assessment counts as sensitive), and
+    deterministic rules (sensitive apps, personal data in typed text). Any one is enough.
+    An input changes data if either the model or the risk assessor says change_data,
+    or if it is sensitive (a failed assessment cannot rule a change out).
 
-        - ``ask``: inputs that change data wait; looking around runs.
-        - ``auto``: payments, deletions, sharing personal data and account changes wait,
-          as do inputs in a sensitive app, typed money or card numbers, and anything the
-          risk check could not assess or called sensitive without naming an effect.
-          Messages and orders paid for in a later step go ahead.
-        - ``full``: only payments wait; a failed assessment cannot rule a payment out.
+    - ``ask``: inputs that change data wait; looking around runs.
+    - ``auto``: payments, deletions, sharing personal data and account changes wait,
+      as do inputs in a sensitive app, typed money or card numbers, and anything the
+      risk check could not assess or called sensitive without naming an effect.
+      Messages and orders paid for in a later step go ahead.
+    - ``full``: only payments wait; a failed assessment cannot rule a payment out.
 
-        A tap, press, swipe, typed text or picker value without a verdict counts as a failed
-        assessment: the policy never assumes an unassessed input is harmless.
+    A tap, press, swipe, typed text or picker value without a verdict counts as a failed
+    assessment: the policy never assumes an unassessed input is harmless.
 
-        The agent finds an app by searching the installed apps (``find_app``) before it
-        opens one: the search only reads, and runs in every mode. In ``ask``,
-        opening a match below the best one (``found_rank`` > 0) waits, so the user confirms
-        that choice; the best match opens, as an app the agent knew does. In ``auto`` and
-        ``full`` the agent opens whichever match it chose: opening an app changes nothing
-    , and every input in it is judged on its own.
+    The agent opens an app by its names, and the best match among the installed apps
+    opens, in every mode. In ``ask``, opening a match below the best one by its
+    ID (``found_rank`` > 0) waits, so the user confirms that choice; the best match
+    opens, as an app the agent knew does. In ``auto`` and
+    ``full`` the agent opens whichever match it chose: opening an app changes nothing,
+    and every input in it is judged on its own.
 
-        An input that answers a system permission prompt: ``ask`` holds every answer,
-        declining included; ``auto`` and ``full`` let a decline run, and let an allow run when it
-        is of a kind in ``GRANTED_PERMISSIONS`` and the narrowest option, which is not sharing
-        data with someone else. Any other allow is judged as before.
+    Receiving a file (``receive_file``) puts a file the user gave the task into the
+    WitX app's own folder and changes nothing else: it has no point to assess, is judged
+    by the same signals, and with none runs in every mode. Sharing it on is an input in
+    another app, judged there.
+
+    An input that answers a system permission prompt: ``ask`` holds every answer,
+    declining included; ``auto`` and ``full`` let a decline run, and let an allow run when it
+    is of a kind in ``GRANTED_PERMISSIONS`` and the narrowest option, which is not sharing
+    data with someone else. Any other allow is judged as before.
     """
     if risk is None and kind in ASSESSED_KINDS:
         risk = RiskVerdict(sensitive=True, effects=[], reason="not assessed", failed=True)
@@ -401,7 +406,7 @@ def check_purchase(
 ) -> UUID | None:
     """The purchase an order or payment input submits for, given the task's newest
     purchase intent. None when it needs none: no order or payment, or a task with one
-    phone (decision D10 applies as is). Otherwise the person must have chosen an option
+    phone (the usual approval applies). Otherwise the person must have chosen an option
     of the newest intent (``purchase_choice_required``), on this phone
     (``purchase_elsewhere``), with the same payee, amount and currency
     (``purchase_changed``: a new price or shop is proposed again)."""

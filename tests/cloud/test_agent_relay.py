@@ -153,6 +153,33 @@ async def test_a_sub_agent_asks_the_main_agent_and_gets_its_answer_in_a_side_tur
     assert "You told A Agent: An iPhone 18 Pro." in last_words(report)
 
 
+async def test_a_side_turn_is_offered_the_same_tools_as_its_main_agent_s_steps(
+    rig: Rig,
+) -> None:
+    def sub(name: str, request: ModelRequest) -> list[dict[str, Any]]:
+        if name == "B" or AGENT_PREFIX in everything(request):
+            return done(request)
+        return [call("ask_user", question="Which phone model is the user's?", to="main")]
+
+    def side(request: ModelRequest) -> list[dict[str, Any]]:
+        asker = str(next(iter(side_asker.values())))
+        return [call("message_agent", agent_id=asker, text="An iPhone 18 Pro.", ask_user=False)]
+
+    side_asker: dict[str, UUID] = {}
+    rig.model.script = [agents(rig, sub, side)] * 12
+    task = await rig.create_task()
+    await rig.worker.run_once()
+    await rig.gateway_round()
+    await rig.worker.run_once()
+    side_asker["A"] = (await children(rig, task.id))["A"].id
+    await rig.settle()
+
+    (turn,) = [r for r in rig.model.requests if side_turn(r)]
+    main = [r for r in rig.model.requests if sub_agent(r) is None and not side_turn(r)]
+    assert main and all(r.tools == turn.tools for r in main)  # so the cached prefix holds
+    assert {"message_agent", "stop_agent"} <= {t["name"] for t in turn.tools}
+
+
 async def test_the_main_agent_puts_a_question_it_cannot_answer_to_the_user(rig: Rig) -> None:
     def sub(name: str, request: ModelRequest) -> list[dict[str, Any]]:
         if name == "B" or UPDATE_PREFIX in everything(request):

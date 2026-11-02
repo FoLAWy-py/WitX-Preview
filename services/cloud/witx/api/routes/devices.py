@@ -89,6 +89,13 @@ def routes(d: Deps) -> APIRouter:
             )
             return next(v for v in await views.device_views(conn) if v.id == device_id)
 
+    @router.delete("/api/v1/devices/{device_id}", status_code=204)
+    async def remove_device(device_id: UUID, who: CurrentActor) -> None:
+        """A device that is gone: disabled and no longer listed; it comes back if
+        its Gateway reports it again."""
+        async with d.db.tenant(who.tenant_id) as conn:
+            await pool.remove(conn, who, device_id, objects=d.objects)
+
     @router.get("/api/v1/devices/{device_id}/changes")
     async def device_changes(device_id: UUID, who: CurrentActor) -> list[api.DeviceChange]:
         async with d.db.tenant(who.tenant_id) as conn:

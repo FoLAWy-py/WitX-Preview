@@ -1,4 +1,4 @@
-"""How WitX processes log : one JSON object per line, carrying the IDs that
+"""How WitX processes log: one JSON object per line, carrying the IDs that
 tie it to a tenant, task, run, step, action or observation, with secrets removed.
 
 Shared by the cloud and the Gateway so that both write the same fields.

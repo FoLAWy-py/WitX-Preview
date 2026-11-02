@@ -1,4 +1,4 @@
-"""Approval semantics : an approval is a person's, bound to one input,
+"""Approval semantics: an approval is a person's, bound to one input,
 used at most once, and only while it is valid."""
 
 import asyncio

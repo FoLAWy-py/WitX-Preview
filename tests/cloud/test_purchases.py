@@ -1,4 +1,4 @@
-"""Purchase intents : in a task with several phones, the agent
+"""Purchase intents: in a task with several phones, the agent
 proposes where to buy and a person chooses; only the chosen phone may order or pay, on
 the chosen terms. Tasks with one phone are unaffected."""
 

@@ -1,4 +1,4 @@
-"""Prometheus text exposition of the operational numbers .
+"""Prometheus text exposition of the operational numbers.
 
 Everything is computed from the database at scrape time, tenant by tenant under row-level
 security, and labelled with the tenant's name: every API instance reports the same

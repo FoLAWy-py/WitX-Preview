@@ -1,4 +1,4 @@
-"""Context compression for long runs (#88, decision D39).
+"""Context compression for long runs.
 
 When a run's history grows long, a separate model call summarizes its earlier steps so
 later requests carry the summary instead of them (context.history). The summary is only

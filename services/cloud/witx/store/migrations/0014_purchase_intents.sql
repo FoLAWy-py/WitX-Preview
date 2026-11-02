@@ -1,4 +1,4 @@
--- Purchase intents : in a task that uses several phones, the agent
+-- Purchase intents: in a task that uses several phones, the agent
 -- proposes where to buy (one option per phone it compared) and the person chooses one.
 -- Only the chosen phone may then order or pay, and only on the chosen terms, so one
 -- purchase goal is never ordered on two platforms. Tasks with one phone do not need one.

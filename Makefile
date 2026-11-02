@@ -1,5 +1,5 @@
 .PHONY: setup check lint format typecheck test test-python test-web contracts build \
-        db-migrate dev-api dev-worker dev-web dev-gateway
+        db-migrate dev-api dev-worker dev-web dev-gateway ios-project ios-test
 
 setup:            ## install all dependencies
 	uv sync --locked
@@ -13,6 +13,7 @@ lint:
 	uv run --locked lint-imports
 	pnpm lint:web
 	pnpm format:check:web
+	uv run --locked python scripts/third_party_notices.py --check
 
 format:
 	uv run --locked ruff format services packages scripts tests
@@ -30,7 +31,6 @@ test-python:      ## needs PostgreSQL: see tests/conftest.py
 	uv run --locked python scripts/export_contracts.py --check
 
 test-web:
-	uv run --locked python scripts/third_party_notices.py --check
 	pnpm test:web
 	pnpm test:browser:web
 
@@ -55,3 +55,9 @@ dev-web:
 
 dev-gateway:      ## GATEWAY_CONFIG=path/to/gateway.toml
 	uv run --locked witx-gateway --config $(GATEWAY_CONFIG)
+
+ios-project:      ## generate apps/ios/WitX.xcodeproj from project.yml (needs xcodegen)
+	cd apps/ios && xcodegen generate
+
+ios-test:         ## the iPhone app's download rules (needs Xcode's Swift)
+	cd apps/ios/WitXDownloads && swift test

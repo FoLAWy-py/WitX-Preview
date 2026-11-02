@@ -13,6 +13,7 @@ WitX 面向个人自部署，一个部署供一位 Owner 使用。租户字段�
 | Services / Store | `services/cloud/witx/services`、`store` | 事务内状态转换、数据库访问、迁移、留存与恢复 |
 | Domain | `services/cloud/witx/domain` | 状态类型与纯函数规则 |
 | Gateway | `services/gateway` | 本机设备发现、Appium 会话、SQLite journal、输入前检查和执行 |
+| iPhone App | `apps/ios` | 很薄的下载器：接收 Gateway 用 `witx://download` 深链交来的文件，从本部署下载并核对 SHA-256；不控制手机、不保存凭据 |
 | Contracts | `packages/contracts` | Python 协议与 Web API 合同，生成 TypeScript 类型 |
 
 API 和 Hub 同进程，Worker 独立运行。Gateway 主动连接云端，手机不开放外部端口。PostgreSQL 管理权威状态；私有对象存储保存截图与恢复账本。Worker 启动时、此后每天会独立清扫没有观察记录认领的截图，失败后每小时重试；最后一次清扫结果按租户保存在数据库中，供 `/metrics` 和告警读取。
@@ -34,7 +35,7 @@ cli → api → hub / worker → harness → services → store / models / objec
 3. 准入检查设备就绪、最新截图、租约 epoch、前序动作和 UNKNOWN 状态。
 4. 敏感输入绑定参数摘要审批；派发时重新计算当前参数摘要，要求它与动作和审批存储的摘要一致，再检查任务控制版本、租约和批准有效性。
 5. Gateway 按 action_id 去重，核对当前设备与屏幕几何 / 前台 App，紧接着再次复核租约 epoch、停止屏障和截止时间，随后写入 journal intent，再执行并记录结果；输入前检查出现意外异常时拒绝动作并返回结果。iOS 文字输入可按驱动写入、逐键输入或输入框菜单粘贴三种方式执行，仍共用准入、策略和单次执行记录。Agent 输入会在实际写入前再次检查焦点是否为安全字段；人工接管允许人在密码框中输入。
-6. 执行后上传新截图。失败可能产生 UNKNOWN，只有人凭更新证据裁定后才能继续。
+6. 执行后上传新截图。失败可能产生 UNKNOWN：该输入的工具调用不结束，Run 等待裁定，只有人凭更新证据裁定后才能继续，裁定作为这次输入的结果交给 Agent。
 
 同一 action_id 最多执行一次；重新提出一个动作是另一个 ID，仍需遵守准入和策略。完成需要晚于最后输入的新截图及已结束的动作，但不构成对业务结果的绝对保证。
 
@@ -46,7 +47,13 @@ Worker 的步骤与停止流程按相同顺序锁定任务、再锁定 Run，避
 
 恢复账本记录删除、停用和吊销。`witx admin recover` 在恢复数据库后重放账本、停止未完成任务，并将无法确认的在途输入保留为 UNKNOWN。账本需要独立保全，完整恢复要求数据库、对象存储与账本均可用。
 
+Gateway 每 30 秒刷新在线时间，90 秒没有更新时其设备下线。Gateway 不会再连回时，`witx admin force-stop <任务 ID>` 先列出持有的设备和在途输入，确认后把在途输入记为 UNKNOWN 并释放设备。不再连接的设备可由 Owner 移除：没有任务、接管或待裁定输入占用时才允许，移除记入恢复账本；Gateway 再报告它时需要重新启用。
+
 用户消息、提问和结果采用用户最新消息的语言。打开 App 可直接按名字查找并启动匹配项，仍执行设备输入的准入和策略检查。
+
+## 文件
+
+用户可以给任务附文件（单个最大 100 MiB），先单独上传，再随消息附到任务上；一天内没有附上的会被清除，附上的随任务删除。文件保存在私有对象存储，Agent 用 `send_file` 把文件交给手机：输入 `receive_file` 与其他输入一样经过准入和策略检查，Gateway 用租户密钥签名的短期链接交给手机上的 WitX App 下载。Android 目前不支持接收文件。
 
 ## Web 加载与任务历史
 
@@ -64,4 +71,4 @@ Plugin 只含文本和元数据，不执行代码、不授予权限。安装锁�
 
 内置 marketplace 名称是 `witx-preview`，来源为 `https://github.com/FoLAWy-py/witx-plugins-preview.git`；未指定来源的 `witx plugin install basics` 使用它。安装和更新仍要求用户检查并确认。
 
-已知安全边界和 Preview 限制见 [README](../README.md#使用前要知道)。
+已知安全边界和 Preview 限制见 [README](../README.zh-CN.md#使用前要知道)。

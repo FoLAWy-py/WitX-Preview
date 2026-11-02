@@ -1,4 +1,4 @@
-"""Skills : know-how for a kind of task, shipped in plugins.
+"""Skills: know-how for a kind of task, shipped in plugins.
 
 A plugin is a folder of skills and nothing else::
 

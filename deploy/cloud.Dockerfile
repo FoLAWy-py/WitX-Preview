@@ -11,11 +11,11 @@ COPY pyproject.toml uv.lock ./
 COPY packages/contracts packages/contracts
 COPY services/cloud services/cloud
 # A workspace member the lock file names; only its metadata is needed.
-COPY services/gateway/pyproject.toml services/gateway/LICENSE services/gateway/NOTICE services/gateway/
+COPY services/gateway/pyproject.toml services/gateway/pyproject.toml
 RUN uv sync --locked --no-dev --no-editable --package witx-cloud
 
 FROM python:3.12.15-slim
-# git: `witx plugin` fetches marketplaces (D85).
+# git: `witx plugin` fetches marketplaces.
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --no-create-home witx \
@@ -27,4 +27,4 @@ ENV PATH=/opt/witx/bin:$PATH PYTHONUNBUFFERED=1 \
 USER witx
 EXPOSE 8000
 ENTRYPOINT ["witx"]
-CMD ["api", "--host", "0.0.0.0"]
+CMD ["api", "--host", "0.0.0.0", "--port", "8000"]

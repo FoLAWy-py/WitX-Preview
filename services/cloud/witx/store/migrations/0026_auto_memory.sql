@@ -1,4 +1,4 @@
--- Auto memory (D59, after Claude Code): the agent keeps what it learns for the person's
+-- Auto memory (after Claude Code): the agent keeps what it learns for the person's
 -- future tasks itself; the person sees each entry and can undo it, delete it, or turn
 -- this off. Three kinds: the person's preferences ('user'), how they corrected or
 -- confirmed the agent ('feedback'), and how an app works ('app', with its package).

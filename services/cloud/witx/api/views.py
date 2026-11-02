@@ -25,9 +25,10 @@ from witx.domain.model import (
     Schedule,
     SideMessage,
     Task,
+    TaskFile,
     TaskGroup,
 )
-from witx.store import devices, execution, purchases, runs, side_turns, tasks
+from witx.store import devices, execution, files, purchases, runs, side_turns, tasks
 from witx.store import memories as memory_store
 
 
@@ -51,6 +52,7 @@ def device_view(
         problems=device.problems,
         enabled=device.enabled,
         taken_over=taken_over,
+        last_seen_at=device.last_seen_at,
     )
 
 
@@ -280,6 +282,17 @@ async def _named(conn: AsyncConnection, task_id: UUID, since: int, through: int)
     return named
 
 
+def file_view(f: TaskFile) -> api.FileView:
+    return api.FileView(
+        id=f.id,
+        name=f.name,
+        size=f.size,
+        content_type=f.content_type,
+        input_seq=f.input_seq,
+        created_at=f.created_at,
+    )
+
+
 async def task_detail(
     conn: AsyncConnection,
     task: Task,
@@ -456,6 +469,7 @@ async def _detail(
             )
             for i in await tasks.inputs(conn, task.id)
         ],
+        files=[file_view(f) for f in await files.of_task(conn, task.id)],
         runs=[_run(r) for r in run_list],
         actions=[action_view(a, approvals.get(a.id), now) for a in actions],
         grants=[grant_view(g, task, now) for g in await execution.task_grants(conn, task.id)],

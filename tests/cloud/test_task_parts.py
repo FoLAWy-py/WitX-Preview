@@ -115,8 +115,7 @@ async def test_an_action_of_unknown_effect_comes_with_the_latest_part_however_ol
     rig.gateway.outcome = "unknown"
     rig.model.script = [
         [call("observe", device_id=device)],
-        lambda r: tap(r, device, 0),
-        [call("ask_user", question="Did the tap happen?")],
+        lambda r: tap(r, device, 0),  # its effect is unknown: the run waits
         lambda r: [say("Here is another thing."), *done(r)],
         lambda r: [say("And another."), *done(r)],
     ]
